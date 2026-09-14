@@ -6,6 +6,8 @@ sqlalchemy>=2.0,<2.1
 psycopg2-binary
 alembic
 redis
+# Upload da planilha de prospecção.
+python-multipart
 rq>=1.15
 # Arquivos do DATASUS: .dbc (DBF compactado) e a planilha de motivos da TAB_SIH.
 pyreaddbc==2.0.4

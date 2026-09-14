@@ -61,6 +61,12 @@ def _json(db: Session, t: RecoveryTracking, com_itens: bool = False) -> dict[str
         "criado_em": t.criado_em.isoformat() if t.criado_em else None,
         "conferido_em": t.conferido_em.isoformat() if t.conferido_em else None,
         "ultimo_mes_carregado": ultimo,
+        "linha_de_base": {
+            "por_hospital": {c: float((t.linha_de_base or {}).get(c, 0)) for c in t.cnes},
+            "mensal": round(sum(float(v) for v in (t.linha_de_base or {}).values()), 2),
+            "meses": list(t.linha_de_base_meses or []),
+            "origem": t.linha_de_base_origem,
+        },
         "resumo": rec.resumo(t, ultimo),
     }
     if com_itens:
@@ -93,6 +99,8 @@ class Condicoes(BaseModel):
     percentual: float | None = Field(default=None, ge=0, le=100)
     fixo_por_hospital: float | None = Field(default=None, ge=0)
     status: str | None = Field(default=None, pattern=r"^(ATIVO|ENCERRADO)$")
+    # Linha de base negociada com a organização, por CNES (R$ por mês).
+    linha_de_base: dict[str, float] | None = None
 
 
 @router.get("")
@@ -126,6 +134,8 @@ def abrir(pedido: NovoAcompanhamento, acesso: Acesso = Depends(require_admin_pla
         percentual=pedido.percentual, fixo_por_hospital=pedido.fixo_por_hospital, tenant_id=pedido.tenant_id,
         status=rec.ATIVO, criado_por=acesso.principal.user_id,
     )
+    t.linha_de_base, t.linha_de_base_meses = rec.calcular_linha_de_base(db, cnes, pedido.inicio)
+    t.linha_de_base_origem = "CALCULADA"
     db.add(t)
     db.flush()
     rec.conferir(db, t)
@@ -154,8 +164,28 @@ def conferir_agora(tracking_id: int, acesso: Acesso = Depends(require_admin_plat
 def mudar_condicoes(tracking_id: int, pedido: Condicoes, acesso: Acesso = Depends(require_admin_plataforma),
                     db: Session = Depends(get_db)) -> dict[str, Any]:
     t = _acompanhamento(db, acesso, tracking_id)
-    for campo, valor in pedido.model_dump(exclude_none=True).items():
+    campos = pedido.model_dump(exclude_none=True)
+    linha = campos.pop("linha_de_base", None)
+    if linha is not None:
+        fora = sorted(set(linha) - set(t.cnes))
+        if fora or any(v < 0 for v in linha.values()):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail=f"Linha de base só para os hospitais do acompanhamento e sem valor negativo{': ' + ', '.join(fora) if fora else ''}.")
+        t.linha_de_base = {c: round(float(linha.get(c, (t.linha_de_base or {}).get(c, 0))), 2) for c in t.cnes}
+        t.linha_de_base_origem = "NEGOCIADA"
+    for campo, valor in campos.items():
         setattr(t, campo, valor)
+    db.commit()
+    return _json(db, t)
+
+
+@router.post("/{tracking_id}/baseline")
+def recalcular_linha_de_base(tracking_id: int, acesso: Acesso = Depends(require_admin_plataforma),
+                             db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Volta a linha de base para a calculada pelos meses carregados antes do início."""
+    t = _acompanhamento(db, acesso, tracking_id)
+    t.linha_de_base, t.linha_de_base_meses = rec.calcular_linha_de_base(db, t.cnes, t.inicio)
+    t.linha_de_base_origem = "CALCULADA"
     db.commit()
     return _json(db, t)
 

@@ -34,7 +34,9 @@ PRAZO_MESES = 4
 
 RESSALVA_FATURA = (
     "Valor recuperado é o valor aprovado no RD do mês para as AIH marcadas neste acompanhamento, conferido nos "
-    "arquivos públicos do DATASUS. Confira o número de cada AIH no SIH do hospital antes de emitir a nota. "
+    "arquivos públicos do DATASUS. O percentual incide só sobre o que passa da linha de base — o que o hospital "
+    "já recuperava sozinho por mês antes do contrato. Confira o número de cada AIH no SIH do hospital antes de "
+    "emitir a nota. "
     "Percentual sobre recurso SUS de organização social depende do contrato de gestão."
 )
 
@@ -58,11 +60,55 @@ def ultimo_mes(db: Session, cnes: list[str]) -> str | None:
     return max((m for m in meses if m), default=None)
 
 
-def conferir(db: Session, t: RecoveryTracking) -> dict[str, int]:
-    """Marca as AIH que faltam e confere quais voltaram aprovadas. Pode rodar quantas vezes quiser."""
-    existentes = {i.n_aih: i for i in t.itens}
+def meses_carregados(db: Session, cnes: list[str]) -> list[str]:
+    meses: set[str] = set()
+    for lote in _lotes(list(cnes)):
+        meses.update(db.execute(select(SihRejection.competencia).where(SihRejection.cnes.in_(lote)).distinct()).scalars())
+        meses.update(db.execute(select(SihApprovedAih.competencia).where(SihApprovedAih.cnes.in_(lote)).distinct()).scalars())
+    return sorted(meses)
+
+
+# Mês só entra na linha de base com dois meses carregados antes dele: sem isso a
+# reapresentação de AIH rejeitada antes da carga não aparece e a média sai baixa.
+HISTORICO_MINIMO = 2
+MESES_LINHA_DE_BASE = 6
+
+
+def calcular_linha_de_base(db: Session, cnes: list[str], inicio: str) -> tuple[dict[str, float], list[str]]:
+    """
+    O que cada hospital já recuperava sozinho por mês antes do contrato.
+
+    Nos meses de processamento anteriores ao início (até seis, com histórico
+    carregado antes deles), soma o valor aprovado das AIH que tinham sido
+    rejeitadas por motivo corrigível num processamento anterior, e divide pelos
+    meses. É o que se desconta do recuperado antes de aplicar o percentual.
+    """
+    meses = meses_carregados(db, cnes)
+    elegiveis = [m for i, m in enumerate(meses) if i >= HISTORICO_MINIMO and m < inicio][-MESES_LINHA_DE_BASE:]
+    base = {c: 0.0 for c in cnes}
+    if not elegiveis:
+        return base, []
+    janela = set(elegiveis)
+    rejeicoes, aprovacoes, motivos = _historico(db, cnes)
+    for n_aih, lista in rejeicoes.items():
+        corrigiveis = [r for r in lista
+                       if categorizar(motivos.get((n_aih, r.competencia), set())).codigo not in FORA_DA_RECUPERACAO]
+        if not corrigiveis:
+            continue
+        primeira = corrigiveis[0]
+        volta = next(((c, v) for c, v in aprovacoes.get(n_aih, []) if c > primeira.competencia), None)
+        if volta and volta[0] in janela:
+            valor = volta[1] if volta[1] is not None else float(primeira.valor or 0)
+            base[primeira.cnes] = base.get(primeira.cnes, 0.0) + valor
+    return {c: round(v / len(elegiveis), 2) for c, v in base.items()}, elegiveis
+
+
+def _historico(db: Session, cnes: list[str]) -> tuple[
+    dict[str, list[SihRejection]], dict[str, list[tuple[str, float | None]]], dict[tuple[str, str], set[str]]
+]:
+    """Rejeições dos hospitais, aprovações dessas AIH (mês e valor) e motivos, em ordem de mês."""
     rejeicoes: dict[str, list[SihRejection]] = defaultdict(list)
-    for lote in _lotes(list(t.cnes)):
+    for lote in _lotes(list(cnes)):
         for r in db.execute(select(SihRejection).where(SihRejection.cnes.in_(lote))).scalars():
             rejeicoes[r.n_aih].append(r)
 
@@ -79,12 +125,22 @@ def conferir(db: Session, t: RecoveryTracking) -> dict[str, int]:
             .where(SihRejectionReason.n_aih.in_(lote))
         ):
             motivos[(n_aih, competencia)].add(codigo)
+    for lista in rejeicoes.values():
+        lista.sort(key=lambda r: r.competencia)
+    for voltas in aprovacoes.values():
+        voltas.sort(key=lambda a: a[0])
+    return rejeicoes, aprovacoes, motivos
+
+
+def conferir(db: Session, t: RecoveryTracking) -> dict[str, int]:
+    """Marca as AIH que faltam e confere quais voltaram aprovadas. Pode rodar quantas vezes quiser."""
+    existentes = {i.n_aih: i for i in t.itens}
+    rejeicoes, aprovacoes, motivos = _historico(db, t.cnes)
 
     agora = datetime.now(timezone.utc)
     novas = recuperadas = 0
     for n_aih, lista in rejeicoes.items():
-        lista.sort(key=lambda r: r.competencia)
-        voltas = sorted(aprovacoes.get(n_aih, []), key=lambda a: a[0])
+        voltas = aprovacoes.get(n_aih, [])
         item = existentes.get(n_aih)
         if item is None:
             antes = [r for r in lista if r.competencia < t.inicio]
@@ -172,6 +228,7 @@ def resumo(t: RecoveryTracking, ultimo: str | None) -> dict[str, Any]:
         "por_mes": [{"competencia": c, **_soma(l, valor_cobrado)} for c, l in sorted(por_mes.items())],
         "prazo_vencido": _soma([i for i in abertas if situacao_do_prazo(i, proximo) == "VENCIDO"]),
         "vencendo": _soma([i for i in abertas if situacao_do_prazo(i, proximo) == "VENCENDO"]),
+        "linha_de_base_mensal": round(sum(float(v) for v in (t.linha_de_base or {}).values()), 2),
     }
 
 
@@ -224,18 +281,39 @@ def fatura(db: Session, t: RecoveryTracking, competencia: str) -> dict[str, Any]
     por_hospital: dict[str, list[RecoveryItem]] = {c: [] for c in t.cnes}
     for i in recuperadas:
         por_hospital.setdefault(i.cnes, []).append(i)
+    base = {c: float(v) for c, v in (t.linha_de_base or {}).items()}
 
-    def conta(valor: float, hospitais: int) -> dict[str, float]:
-        variavel = round(valor * percentual / 100, 2)
-        return {"valor_recuperado": round(valor, 2), "fixo": round(fixo * hospitais, 2), "variavel": variavel,
-                "total": round(fixo * hospitais + variavel, 2)}
+    # Percentual só sobre o que passa da linha de base, hospital por hospital:
+    # um hospital abaixo da base não come o excedente de outro.
+    hospitais = []
+    for c, itens in por_hospital.items():
+        recuperado = sum(valor_cobrado(i) for i in itens)
+        linha = base.get(c, 0.0)
+        excedente = max(0.0, recuperado - linha)
+        variavel = round(excedente * percentual / 100, 2)
+        hospitais.append({
+            "cnes": c, "nome": nomes.get(c), "aih": len(itens), "valor_recuperado": round(recuperado, 2),
+            "linha_de_base": round(linha, 2), "excedente": round(excedente, 2), "fixo": round(fixo, 2),
+            "variavel": variavel, "total": round(fixo + variavel, 2),
+        })
+    variavel_total = round(sum(h["variavel"] for h in hospitais), 2)
+    fixo_total = round(fixo * len(hospitais), 2)
 
     return {
         "acompanhamento": {"id": t.id, "nome": t.nome, "percentual": percentual, "fixo_por_hospital": fixo},
         "competencia": competencia,
-        "hospitais": [{"cnes": c, "nome": nomes.get(c), "aih": len(itens),
-                       **conta(sum(valor_cobrado(i) for i in itens), 1)} for c, itens in por_hospital.items()],
-        "totais": {"aih": len(recuperadas), **conta(sum(valor_cobrado(i) for i in recuperadas), len(por_hospital))},
+        "linha_de_base": {"origem": t.linha_de_base_origem, "meses": list(t.linha_de_base_meses or []),
+                          "mensal": round(sum(base.values()), 2)},
+        "hospitais": hospitais,
+        "totais": {
+            "aih": len(recuperadas),
+            "valor_recuperado": round(sum(h["valor_recuperado"] for h in hospitais), 2),
+            "linha_de_base": round(sum(h["linha_de_base"] for h in hospitais), 2),
+            "excedente": round(sum(h["excedente"] for h in hospitais), 2),
+            "fixo": fixo_total,
+            "variavel": variavel_total,
+            "total": round(fixo_total + variavel_total, 2),
+        },
         "linhas": [{**item_json(i, nomes, descricoes, None), "valor_cobrado": valor_cobrado(i),
                     "arquivo_rd": arquivos.get(i.uf)} for i in recuperadas],
         "ressalva": RESSALVA_FATURA,

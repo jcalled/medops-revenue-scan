@@ -20,7 +20,11 @@ from app.config import get_settings
 @lru_cache(maxsize=1)
 def engine() -> Engine:
     settings = get_settings()
-    eng = create_engine(settings.database_url, pool_pre_ping=True)
+    opcoes: dict = {"pool_pre_ping": True}
+    if not settings.database_url.startswith("sqlite"):
+        # Conexão parada é fechada pelo Postgres gerenciado; recicla antes disso.
+        opcoes.update(pool_size=settings.db_pool_size, max_overflow=settings.db_max_overflow, pool_recycle=1800)
+    eng = create_engine(settings.database_url, **opcoes)
     if eng.dialect.name == "postgresql":
         @event.listens_for(eng, "connect")
         def _schema(conexao, _registro):  # noqa: ANN001

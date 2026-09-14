@@ -466,6 +466,12 @@ class RecoveryTracking(_Privado, Base):
     criado_por: Mapped[int | None] = mapped_column(Integer)
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     conferido_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # O que os hospitais já recuperavam sozinhos por mês antes do contrato, por CNES.
+    # Só o que passa disso entra no percentual. CALCULADA pelos meses anteriores
+    # ao início ou NEGOCIADA com a organização.
+    linha_de_base: Mapped[dict[str, float]] = mapped_column(_JSON, nullable=False, default=dict)
+    linha_de_base_meses: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    linha_de_base_origem: Mapped[str] = mapped_column(String(12), nullable=False, default="CALCULADA")
 
     itens: Mapped[list[RecoveryItem]] = relationship(
         back_populates="acompanhamento", cascade="all, delete-orphan", order_by="RecoveryItem.id"
@@ -510,3 +516,66 @@ class RecoveryItem(_Privado, Base):
         UniqueConstraint("tracking_id", "n_aih", name="uq_recovery_items"),
         Index("ix_recovery_items_tracking_situacao", "tracking_id", "situacao"),
     )
+
+
+class Prospect(_Privado, Base):
+    """
+    Organização em prospecção: dados públicos da pesquisa (planilha) e o
+    andamento comercial. É da MedOps; nenhum tenant vê.
+    """
+
+    __tablename__ = "prospects"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int | None] = mapped_column(
+        ForeignKey("management_organizations.id", ondelete="SET NULL"), index=True)
+    nome: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    uf: Mapped[str | None] = mapped_column(String(2))
+    rank: Mapped[int | None] = mapped_column(Integer)
+    score: Mapped[int | None] = mapped_column(Integer)
+    prioridade: Mapped[str | None] = mapped_column(String(4))
+    presenca: Mapped[str | None] = mapped_column(String(255))
+    situacao_escopo: Mapped[str | None] = mapped_column(String(255))
+    hospitais_confirmados: Mapped[int | None] = mapped_column(Integer)
+    rede: Mapped[str | None] = mapped_column(Text)
+    principais_unidades: Mapped[str | None] = mapped_column(Text)
+    lideranca: Mapped[str | None] = mapped_column(String(255))
+    contato_publico: Mapped[str | None] = mapped_column(Text)
+    site: Mapped[str | None] = mapped_column(String(255))
+    fonte: Mapped[str | None] = mapped_column(String(500))
+    fit: Mapped[str | None] = mapped_column(String(255))
+    confianca: Mapped[str | None] = mapped_column(String(20))
+    # MAPEADA | CONTATO | REUNIAO | DIAGNOSTICO | PROPOSTA | NEGOCIACAO | FECHADA | PERDIDA
+    etapa: Mapped[str] = mapped_column(String(20), nullable=False, default="MAPEADA")
+    contato_nome: Mapped[str | None] = mapped_column(String(120))
+    contato_cargo: Mapped[str | None] = mapped_column(String(120))
+    contato_email: Mapped[str | None] = mapped_column(String(255))
+    contato_telefone: Mapped[str | None] = mapped_column(String(60))
+    responsavel: Mapped[str | None] = mapped_column(String(120))
+    proxima_acao: Mapped[str | None] = mapped_column(Text)
+    proxima_acao_em: Mapped[date | None] = mapped_column(Date)
+    proposta_percentual: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    proposta_fixo: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    motivo_perda: Mapped[str | None] = mapped_column(Text)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    atualizado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    eventos: Mapped[list[ProspectEvent]] = relationship(
+        back_populates="prospect", cascade="all, delete-orphan", order_by="ProspectEvent.id.desc()")
+
+
+class ProspectEvent(_Privado, Base):
+    """Histórico da prospecção: nota, mudança de etapa, proposta, importação."""
+
+    __tablename__ = "prospect_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    prospect_id: Mapped[int] = mapped_column(ForeignKey("prospects.id", ondelete="CASCADE"), nullable=False, index=True)
+    # NOTA | ETAPA | PROPOSTA | IMPORTACAO
+    tipo: Mapped[str] = mapped_column(String(12), nullable=False)
+    texto: Mapped[str] = mapped_column(Text, nullable=False)
+    criado_por: Mapped[int | None] = mapped_column(Integer)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    prospect: Mapped[Prospect] = relationship(back_populates="eventos")

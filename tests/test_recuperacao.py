@@ -97,15 +97,20 @@ def test_fatura_do_mes(app_com_nucleo, fabrica_sessao):
     http = _http_admin(app_com_nucleo)
     aberto = _abrir(http)
     fatura = http.get(f"/api/revenue-scan/recovery/{aberto['id']}/invoice?competencia=202607", headers=ADMIN).json()
-    assert fatura["totais"] == {"aih": 2, "valor_recuperado": 1580.0, "fixo": 6900.0, "variavel": 237.0, "total": 7137.0}
+    assert fatura["totais"] == {"aih": 2, "valor_recuperado": 1580.0, "linha_de_base": 0.0, "excedente": 1580.0,
+                                "fixo": 6900.0, "variavel": 237.0, "total": 7137.0}
     assert fatura["hospitais"] == [{"cnes": A, "nome": "HOSPITAL A", "aih": 2, "valor_recuperado": 1580.0,
-                                    "fixo": 6900.0, "variavel": 237.0, "total": 7137.0}]
+                                    "linha_de_base": 0.0, "excedente": 1580.0, "fixo": 6900.0, "variavel": 237.0,
+                                    "total": 7137.0}]
+    # Sem meses carregados antes do início com histórico, não há o que descontar — e a fatura diz.
+    assert fatura["linha_de_base"] == {"origem": "CALCULADA", "meses": [], "mensal": 0.0}
     primeira = fatura["linhas"][0]
     assert primeira["n_aih"] == "1" and primeira["valor_cobrado"] == 1100.0 and not primeira["valor_estimado"]
     assert primeira["arquivo_rd"] == {"arquivo": "RDCE2607.dbc", "sha256": "rd07"}
 
     vazia = http.get(f"/api/revenue-scan/recovery/{aberto['id']}/invoice?competencia=202606", headers=ADMIN).json()
-    assert vazia["totais"] == {"aih": 0, "valor_recuperado": 0.0, "fixo": 6900.0, "variavel": 0.0, "total": 6900.0}
+    assert vazia["totais"] == {"aih": 0, "valor_recuperado": 0.0, "linha_de_base": 0.0, "excedente": 0.0,
+                               "fixo": 6900.0, "variavel": 0.0, "total": 6900.0}
     assert http.get(f"/api/revenue-scan/recovery/{aberto['id']}/invoice?competencia=2026-07",
                     headers=ADMIN).status_code == 422
 
@@ -113,6 +118,44 @@ def test_fatura_do_mes(app_com_nucleo, fabrica_sessao):
     assert mudado["percentual"] == 20.0
     fatura = http.get(f"/api/revenue-scan/recovery/{aberto['id']}/invoice?competencia=202607", headers=ADMIN).json()
     assert fatura["totais"]["variavel"] == 316.0
+
+
+def test_desconta_o_que_o_hospital_ja_recuperava_sozinho(app_com_nucleo, fabrica_sessao):
+    _dados(fabrica_sessao)
+    with fabrica_sessao() as db:
+        _aprovar(db, "202601", "x1", 50)                      # jan/26 carregado, sem rejeição antes
+        _rejeitar(db, "202602", "b1", 1000, "060082")
+        _aprovar(db, "202604", "b1", 900)                     # voltou sozinha em abril
+        _rejeitar(db, "202603", "b2", 400, "060082")
+        _aprovar(db, "202605", "b2", 300)                     # voltou sozinha em maio
+        _rejeitar(db, "202603", "b3", 800, "010003")
+        _aprovar(db, "202604", "b3", 800)                     # bloqueio do gestor: não é recuperação
+        db.commit()
+    http = _http_admin(app_com_nucleo)
+    aberto = _abrir(http)
+    # Meses com dois carregados antes e anteriores ao início: mar, abr e mai. (900 + 300) / 3.
+    assert aberto["linha_de_base"] == {"por_hospital": {A: 400.0}, "mensal": 400.0,
+                                       "meses": ["202603", "202604", "202605"], "origem": "CALCULADA"}
+    caminho = f"/api/revenue-scan/recovery/{aberto['id']}"
+
+    fatura = http.get(f"{caminho}/invoice?competencia=202607", headers=ADMIN).json()
+    assert fatura["hospitais"][0] | {} == {**fatura["hospitais"][0], "valor_recuperado": 1580.0, "linha_de_base": 400.0,
+                                           "excedente": 1180.0, "variavel": 177.0, "total": 7077.0}
+    assert fatura["totais"]["excedente"] == 1180.0 and fatura["linha_de_base"]["mensal"] == 400.0
+
+    negociada = http.patch(caminho, headers=ADMIN, json={"linha_de_base": {A: 1000}}).json()
+    assert negociada["linha_de_base"]["origem"] == "NEGOCIADA" and negociada["linha_de_base"]["mensal"] == 1000.0
+    assert http.get(f"{caminho}/invoice?competencia=202607", headers=ADMIN).json()["totais"]["variavel"] == 87.0
+    assert http.patch(caminho, headers=ADMIN, json={"linha_de_base": {"0000001": 5}}).status_code == 422
+
+    # Hospital abaixo da base não paga percentual, e não fica negativo.
+    http.patch(caminho, headers=ADMIN, json={"linha_de_base": {A: 5000}})
+    assert http.get(f"{caminho}/invoice?competencia=202607", headers=ADMIN).json()["totais"] == {
+        "aih": 2, "valor_recuperado": 1580.0, "linha_de_base": 5000.0, "excedente": 0.0, "fixo": 6900.0,
+        "variavel": 0.0, "total": 6900.0}
+
+    recalculada = http.post(f"{caminho}/baseline", headers=ADMIN).json()
+    assert recalculada["linha_de_base"]["origem"] == "CALCULADA" and recalculada["linha_de_base"]["mensal"] == 400.0
 
 
 def test_conferir_de_novo_nao_duplica(app_com_nucleo, fabrica_sessao):
