@@ -17,8 +17,8 @@ de desenho estão em [ARQUITETURA.md](ARQUITETURA.md).
 | 2 | Adapters SIH RD/RJ/ER, motivos e CNES; carga por UF (ou Brasil) no worker; organizações por planilha; ISGH; resumo por OSS | feito |
 | 3 | Leitos e habilitações do CNES; mix de procedimentos; semelhantes por UF, porte, natureza e faixa de alta complexidade; RevenueOpportunityEngine; score; rotas de scan do hospital e ranking da OSS | feito |
 | 4 | Painel da OSS (`/revenue-scan`), scan do hospital (`/revenue-scan/hospital?cnes=`) e modo apresentação (`/presentation?org=`) no `glosaai-frontend` | feito |
-| 5 | PDF executivo, prospecção, telas do SuperAdmin | próxima |
-| 6 | SIA/SUS, SP do SIH, ticket e mix; demais UFs | — |
+| 5 | Prova AIH por AIH; modelo híbrido; dados do DATASUS pela tela; recuperação com fatura e linha de base; prospecção (CRM); cadastro de organizações; relatório executivo em PDF (`/relatorio`) | feito |
+| 6 | SIA/SUS, SP do SIH, ticket e mix | — |
 
 ## Rodar localmente
 
@@ -58,7 +58,48 @@ gerido por OSS é `ESTADUAL` e aparece na OSS pelo vínculo cadastrado.
 ## Carga de dados
 
 Ver [CARGA_DATASUS.md](CARGA_DATASUS.md): qualquer UF ou o Brasil inteiro, e
-qualquer organização gestora por planilha.
+qualquer organização gestora por planilha. Pela tela, a administração da
+plataforma usa **Dados do DATASUS** (`/revenue-scan/dados`): UFs, meses
+publicados, fila do worker e histórico de arquivos.
+
+Medido: um mês de SP (253.871 AIH aprovadas, 607 hospitais) carrega em 47 s com
+pico de 518 MB; o recálculo leva 4,6 s. O `worker-revenue-scan` tem 2 GB.
+
+## Prova AIH por AIH
+
+`GET /api/revenue-scan/hospitals/{cnes}/aih-rejeitadas`: cada AIH rejeitada do
+hospital marcada como **entra na recuperação**, **não entra** (bloqueio do gestor
+ou motivo sem regra) ou **já voltou aprovada**, com motivo oficial, o porquê e o
+arquivo RJ/ER de origem com SHA-256. A oportunidade confirmada nunca passa da
+soma das AIH marcadas, nem no total nem no mês.
+
+## Recuperação e fatura
+
+`/api/revenue-scan/recovery` (tela `/revenue-scan/recuperacao`). O acompanhamento
+marca as AIH corrigíveis ainda não recebidas — BASE (rejeitadas antes do início)
+e NOVA (durante o contrato) — e, a cada carga, as que voltam aprovadas depois da
+rejeição viram **recuperadas** com o valor aprovado no RD.
+
+Fatura do mês: fixo por hospital + percentual **só sobre o excedente da linha de
+base**, hospital por hospital. A linha de base é o que o hospital já recuperava
+sozinho por mês: média dos até seis meses de processamento anteriores ao início
+(cada um com dois meses carregados antes), ou o valor negociado
+(`PATCH linha_de_base`). Sem meses anteriores carregados ela fica zero e a tela
+avisa — carregue ao menos seis meses antes do início.
+
+## Prospecção e organizações
+
+Só administração da plataforma.
+
+- `/api/revenue-scan/crm/prospects` (tela `/revenue-scan/prospeccao`): importa a
+  planilha de prospecção (`POST .../import` ou `python -m app.seed.prospeccao
+  planilha.xlsx`), etapas com histórico, notas e proposta. Reimportar atualiza
+  os dados públicos e preserva o andamento.
+- `POST .../prospects/{id}/organization` cria a organização gestora;
+  `GET .../prospects/{id}/suggestions` sugere CNES pelas unidades citadas.
+- `/api/revenue-scan/organizations` e `/establishments` (tela
+  `/revenue-scan/organizacoes`): cadastro, vínculo, confirmação e busca de
+  hospitais por nome ou CNES.
 
 ## Produção
 
@@ -69,8 +110,15 @@ O serviço sobe junto com o compose do núcleo (`glosa_ai/deploy`): o
 cá, no mesmo domínio da API.
 
 No `.env` deste repositório no servidor: `APP_ENV=production`, o **mesmo**
-`JWT_SECRET` do núcleo, `DATABASE_URL` do Postgres e `CORS_ORIGINS` com o
-endereço do frontend. `CORE_API_URL` e `REDIS_URL` vêm do compose.
+`JWT_SECRET` do núcleo, `DATABASE_URL` do Postgres (porta direta, não a do pool
+PgBouncer: o serviço define `search_path` na conexão) e `CORS_ORIGINS` com o
+endereço **do frontend** (ex.: `https://www.glosaai.com.br`), não o da API.
+`CORE_API_URL` e `REDIS_URL` vêm do compose. `DB_POOL_SIZE` e `DB_MAX_OVERFLOW`
+(padrão 5 e 5, por processo) cabem no limite de conexões do Postgres gerenciado.
+
+O nginx do droplet roda fora do Docker: o serviço publica `127.0.0.1:8110` e o
+site da API encaminha `/api/revenue-scan/` para lá (`glosa_ai/deploy/nginx.conf`).
+Mudança no `.env` só vale com `docker compose ... up -d --force-recreate`.
 
 ## Liberar para um tenant
 
@@ -96,4 +144,3 @@ alembic upgrade head
 
 As tabelas ficam no schema `DB_SCHEMA` (padrão `revenue_scan`) e a versão do
 Alembic em `revenue_scan.revenue_scan_alembic`, separada da do núcleo.
-# medops-revenue-scan
