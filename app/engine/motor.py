@@ -23,7 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from app.engine.categorias import CATEGORIAS
+from app.engine.categorias import CATEGORIAS, FORA_DA_RECUPERACAO
 from app.engine.estatistica import percentil, quantil
 from app.engine.perfil import Perfil
 
@@ -232,8 +232,9 @@ class RevenueOpportunityEngine:
                 continue
             amostra = 1.0 if perdas.aih >= 30 else 0.85 if perdas.aih >= 10 else 0.6
             confianca = round(categoria.confianca * amostra * (1.0 if len(pares) >= MIN_PARES else 0.7))
+            recuperavel = categoria.codigo not in FORA_DA_RECUPERACAO
             saida.append(self._base(
-                categoria.opportunity_type, CONFIRMADA, categoria=categoria.codigo,
+                categoria.opportunity_type, CONFIRMADA if recuperavel else ESTIMADA, categoria=categoria.codigo,
                 observed_value=round(perdas.valor, 2), benchmark_value=round(esperado, 2), gap=round(gap, 2),
                 estimated_financial_impact=round(gap, 2), confidence_score=confianca,
                 evidence={
@@ -248,6 +249,9 @@ class RevenueOpportunityEngine:
                     "leitura": (
                         "A rejeição está registrada pelo SUS e a AIH não voltou aprovada. O impacto é a parte que "
                         "passa do que hospitais semelhantes perdem na mesma categoria."
+                        if recuperavel else
+                        "A rejeição está registrada pelo SUS, mas o motivo não se corrige no faturamento do hospital "
+                        "ou ainda não tem regra de correção. Fica como sinal a validar, fora do valor confirmado."
                     ),
                 },
                 recommended_action=categoria.acao,

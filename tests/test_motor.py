@@ -118,6 +118,19 @@ def test_rejeicao_so_a_parte_acima_dos_semelhantes():
     assert not [o for o in motor(igual, *pares).analisar("0000002").oportunidades if o["categoria"]]
 
 
+def test_bloqueio_do_gestor_e_motivo_sem_regra_nao_entram_no_confirmado():
+    # O que se cobra no híbrido tem que aparecer AIH a AIH como recuperável.
+    perdas = {"ADMINISTRATIVO": Perdas(aih=40, valor=200_000.0, motivos={"010003": 40}),
+              "OUTROS": Perdas(aih=40, valor=150_000.0, motivos={"999999": 40})}
+    alvo = perfil("0000001", perdas=perdas, rejeitado=350_000.0, valor=1_700_000.0)
+    pares = [perfil(f"10000{i:02d}", rejeitado=0.0, valor=1_980_000.0) for i in range(6)]
+    analise = motor(alvo, *pares).analisar("0000001")
+    rejeicoes = {o["categoria"]: o for o in analise.oportunidades if o["categoria"]}
+    assert set(rejeicoes) == {"ADMINISTRATIVO", "OUTROS"}
+    assert all(o["status"] == "ESTIMATED_OPPORTUNITY" for o in rejeicoes.values())
+    assert "fora do valor confirmado" in rejeicoes["OUTROS"]["evidence"]["leitura"]
+
+
 def test_valor_medio_abaixo_no_mesmo_procedimento():
     alvo = perfil("0000001", aih=1000, valor=1_000_000.0)
     pares = [perfil(f"10000{i:02d}", aih=1000, valor=1_300_000.0) for i in range(6)]

@@ -87,6 +87,10 @@ CATEGORIAS: tuple[Categoria, ...] = (
 
 POR_CODIGO: dict[str, Categoria] = {c.codigo: c for c in CATEGORIAS}
 OUTROS = POR_CODIGO["OUTROS"]
+# Rejeição registrada, mas não corrigível pelo faturamento (bloqueio do gestor)
+# ou sem regra de correção (motivo desconhecido). Não entra no valor confirmado
+# nem na lista de AIH a recuperar: o que se cobra tem que ser provável AIH a AIH.
+FORA_DA_RECUPERACAO = frozenset({"ADMINISTRATIVO", "OUTROS"})
 _ORDEM = {c.codigo: i for i, c in enumerate(CATEGORIAS)}
 _POR_MOTIVO = {motivo: c for c in CATEGORIAS for motivo in c.motivos}
 

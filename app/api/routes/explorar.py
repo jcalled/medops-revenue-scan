@@ -22,6 +22,7 @@ from app.api.routes.organizacoes import _escopo
 from app.api.routes.scan import RESSALVA, _competencias, _meses_no_periodo, _principal
 from app.db import get_db
 from app.domain.classificacao import GESTOES, NATUREZAS, ORDEM_PORTES
+from app.domain.prova import confirmado_por_mes
 from app.domain.resumo import _lotes, resumo
 from app.models import Establishment, HospitalScore, ManagementOrganization, Municipality, OrganizationEstablishment
 
@@ -285,6 +286,9 @@ def panorama(
     organizacoes = _organizacoes_por_cnes(db, [s.cnes for s, _ in exibidos])
     municipios = _municipios(db, {s.codigo_municipio for s, _ in exibidos})
 
+    # Confirmada por mês, provável AIH a AIH: é a base do mês na simulação do híbrido.
+    por_mes = confirmado_por_mes(db, scores)
+
     rejeicao = None
     if scores:
         corpo = resumo(db, cnes=cnes, competencias=_competencias(min(s.periodo_inicio for s in scores),
@@ -311,7 +315,10 @@ def panorama(
         "impacto_sinais_total": round(sum(float(s.impacto_sinais or 0) for s in scores), 2),
         "impacto_estimado_total": round(sum(float(s.impacto_estimado or 0) for s in scores), 2),
         "valor_apresentado_total": round(sum(float(s.valor_apresentado or 0) for s in scores), 2),
-        "ranking": [_item(s, e, organizacoes, municipios) for s, e in exibidos],
+        "confirmado_por_mes": {m: round(sum(v.get(m, 0.0) for v in por_mes.values()), 2)
+                               for m in (rejeicao["competencias"] if rejeicao else [])},
+        "ranking": [{**_item(s, e, organizacoes, municipios), "confirmado_por_mes": por_mes.get(s.cnes, {})}
+                    for s, e in exibidos],
         "ranking_limitado": len(linhas) > limite_ranking,
         "rejeicao": rejeicao,
         "classe_dado": "PUBLICO",
