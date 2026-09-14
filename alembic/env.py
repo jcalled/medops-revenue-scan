@@ -16,10 +16,11 @@ config = context.config
 if config.config_file_name:
     fileConfig(config.config_file_name)
 
+from app.models import Base  # noqa: E402
+
 settings = get_settings()
 TABELA_DE_VERSAO = "revenue_scan_alembic"
-# As tabelas entram a partir da carga do DATASUS; até lá não há metadata.
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
@@ -37,6 +38,10 @@ def run_migrations_online() -> None:
         postgres = conexao.dialect.name == "postgresql"
         if postgres:
             conexao.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{settings.db_schema}"'))
+            conexao.commit()
+            # As migrations criam tabelas sem schema no nome; o search_path as
+            # põe no schema do serviço, e não no public do núcleo.
+            conexao.execute(text(f'SET search_path TO "{settings.db_schema}"'))
             conexao.commit()
         context.configure(
             connection=conexao, target_metadata=target_metadata,

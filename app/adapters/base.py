@@ -32,6 +32,9 @@ class DataSourceAdapter(ABC):
     #: Identificador da fonte, ex.: "SIH_RD".
     fonte: str
     classe: ClasseDado = ClasseDado.PUBLICO
+    #: De onde veio o arquivo. Arquivo baixado é apagado depois da carga;
+    #: arquivo de pasta local (enviado) fica onde estava.
+    origem: OrigemArquivo = OrigemArquivo.DOWNLOAD
 
     @abstractmethod
     def competencias_disponiveis(self, uf: str) -> list[str]:

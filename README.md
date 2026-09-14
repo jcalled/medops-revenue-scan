@@ -14,8 +14,8 @@ de desenho estão em [ARQUITETURA.md](ARQUITETURA.md).
 | Etapa | O que entra | Situação |
 |---|---|---|
 | 1 | Contrato de produtos no núcleo, menu por contrato, esqueleto deste serviço com o login compartilhado | feito |
-| 2 | Adapters SIH RD/RJ/ER e CNES, carga por UF no worker, seed do ISGH | próxima |
-| 3 | Motor de oportunidades e benchmark por peer group | — |
+| 2 | Adapters SIH RD/RJ/ER, motivos e CNES; carga por UF (ou Brasil) no worker; organizações por planilha; ISGH; resumo por OSS | feito |
+| 3 | Motor de oportunidades e benchmark por peer group | próxima |
 | 4 | Painel da OSS, painel do hospital, modo apresentação | — |
 | 5 | PDF executivo, prospecção, telas do SuperAdmin | — |
 | 6 | SIA/SUS, SP do SIH, ticket e mix; demais UFs | — |
@@ -35,6 +35,23 @@ o contrato.
 
 No frontend, defina `NEXT_PUBLIC_REVENUE_SCAN_URL` (padrão
 `http://localhost:8100`). A entrada do produto é `/revenue-scan`.
+
+## Carga de dados
+
+Ver [CARGA_DATASUS.md](CARGA_DATASUS.md): qualquer UF ou o Brasil inteiro, e
+qualquer organização gestora por planilha.
+
+## Produção
+
+O serviço sobe junto com o compose do núcleo (`glosa_ai/deploy`): o
+`deploy.sh` acha este repositório ao lado do `glosa_ai` (ou em
+`REVENUE_SCAN_DIR`), migra, cadastra as organizações e sobe `revenue-scan` e
+`worker-revenue-scan`. O nginx do núcleo encaminha `/api/revenue-scan/` para
+cá, no mesmo domínio da API.
+
+No `.env` deste repositório no servidor: `APP_ENV=production`, o **mesmo**
+`JWT_SECRET` do núcleo, `DATABASE_URL` do Postgres e `CORS_ORIGINS` com o
+endereço do frontend. `CORE_API_URL` e `REDIS_URL` vêm do compose.
 
 ## Liberar para um tenant
 
