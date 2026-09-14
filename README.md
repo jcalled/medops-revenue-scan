@@ -77,3 +77,4 @@ alembic upgrade head
 
 As tabelas ficam no schema `DB_SCHEMA` (padrão `revenue_scan`) e a versão do
 Alembic em `revenue_scan.revenue_scan_alembic`, separada da do núcleo.
+# medops-revenue-scan
