@@ -160,8 +160,8 @@ class SihApprovedAih(_Publico, Base):
     """
     Número da AIH aprovada em cada processamento.
 
-    Só o número: é o que responde se uma AIH rejeitada voltou aprovada depois,
-    em qualquer ordem de carga.
+    O número responde se uma AIH rejeitada voltou aprovada depois, em qualquer
+    ordem de carga; o valor é o que a recuperação cobra.
     """
 
     __tablename__ = "sih_approved_aih"
@@ -171,6 +171,8 @@ class SihApprovedAih(_Publico, Base):
     competencia: Mapped[str] = mapped_column(String(6), nullable=False)
     cnes: Mapped[str] = mapped_column(String(7), nullable=False)
     n_aih: Mapped[str] = mapped_column(String(13), nullable=False)
+    # VAL_TOT do RD: o dinheiro que entrou. É a base da cobrança da recuperação.
+    valor: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
 
     __table_args__ = (
         UniqueConstraint("uf", "n_aih", "competencia", name="uq_sih_approved_aih"),
@@ -434,3 +436,77 @@ class Municipality(_Publico, Base):
     codigo_cnes: Mapped[str] = mapped_column(String(6), nullable=False, unique=True)
     nome: Mapped[str] = mapped_column(String(120), nullable=False)
     uf: Mapped[str] = mapped_column(String(2), nullable=False)
+
+
+class _Privado:
+    classe_dado = ClasseDado.PRIVADO
+
+
+class RecoveryTracking(_Privado, Base):
+    """
+    Acompanhamento da recuperação contratada: hospitais, mês de início e as
+    condições do modelo híbrido. É do tenant (ou da MedOps, antes do contrato,
+    com tenant_id vazio) e nunca aparece para outro.
+    """
+
+    __tablename__ = "recovery_trackings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    nome: Mapped[str] = mapped_column(String(120), nullable=False)
+    organization_id: Mapped[int | None] = mapped_column(
+        ForeignKey("management_organizations.id", ondelete="SET NULL"))
+    cnes: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    # Primeiro mês de PROCESSAMENTO do contrato (AAAAMM).
+    inicio: Mapped[str] = mapped_column(String(6), nullable=False)
+    percentual: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=15)
+    fixo_por_hospital: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=6900)
+    # ATIVO | ENCERRADO
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="ATIVO")
+    criado_por: Mapped[int | None] = mapped_column(Integer)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    conferido_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    itens: Mapped[list[RecoveryItem]] = relationship(
+        back_populates="acompanhamento", cascade="all, delete-orphan", order_by="RecoveryItem.id"
+    )
+
+
+class RecoveryItem(_Privado, Base):
+    """
+    AIH marcada para recuperar num acompanhamento.
+
+    BASE: rejeitada antes do início e ainda não recebida. NOVA: rejeitada
+    durante o acompanhamento. Vira RECUPERADA quando aparece aprovada num
+    processamento posterior à rejeição, com o mês e o valor aprovado.
+    """
+
+    __tablename__ = "recovery_items"
+
+    id: Mapped[int] = mapped_column(_ID, primary_key=True)
+    tracking_id: Mapped[int] = mapped_column(
+        ForeignKey("recovery_trackings.id", ondelete="CASCADE"), nullable=False, index=True)
+    cnes: Mapped[str] = mapped_column(String(7), nullable=False)
+    uf: Mapped[str] = mapped_column(String(2), nullable=False)
+    n_aih: Mapped[str] = mapped_column(String(13), nullable=False)
+    origem: Mapped[str] = mapped_column(String(8), nullable=False)
+    competencia_rejeicao: Mapped[str] = mapped_column(String(6), nullable=False)
+    competencia_aih: Mapped[str | None] = mapped_column(String(6))
+    procedimento: Mapped[str | None] = mapped_column(String(10))
+    dt_saida: Mapped[date | None] = mapped_column(Date)
+    valor_rejeitado: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    categoria: Mapped[str] = mapped_column(String(30), nullable=False)
+    motivos: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    # EM_ABERTO | RECUPERADA
+    situacao: Mapped[str] = mapped_column(String(12), nullable=False, default="EM_ABERTO")
+    competencia_aprovacao: Mapped[str | None] = mapped_column(String(6))
+    valor_aprovado: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    marcado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    recuperado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    acompanhamento: Mapped[RecoveryTracking] = relationship(back_populates="itens")
+
+    __table_args__ = (
+        UniqueConstraint("tracking_id", "n_aih", name="uq_recovery_items"),
+        Index("ix_recovery_items_tracking_situacao", "tracking_id", "situacao"),
+    )

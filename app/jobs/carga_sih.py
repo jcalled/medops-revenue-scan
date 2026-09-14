@@ -132,7 +132,8 @@ def carregar_competencia(db: Session, uf: str, competencia: str, adapters: dict[
              **{k: (round(v, 2) if isinstance(v, float) else v) for k, v in p.items()}}
             for (cnes, proc, complexidade), p in por_procedimento.items()
         ])
-        _inserir(db, SihApprovedAih, [{**base, "cnes": l["cnes"], "n_aih": l["n_aih"]} for l in aprovadas.values()])
+        _inserir(db, SihApprovedAih, [{**base, "cnes": l["cnes"], "n_aih": l["n_aih"], "valor": l["valor"]}
+                                     for l in aprovadas.values()])
         _inserir(db, SihRejection, [
             {**base, "cnes": l["cnes"], "n_aih": l["n_aih"], "competencia_aih": l["competencia_aih"],
              "proc_realizado": l["proc_realizado"], "valor": l["valor"], "dt_internacao": l["dt_internacao"],
@@ -291,6 +292,13 @@ def job_carregar_uf(uf: str, competencias: list[str] | None = None, quantidade: 
         except Exception:  # noqa: BLE001 — sem leitos o scan sai sem porte, mas sai
             logger.exception("Leitos e habilitações do CNES de %s não carregados", uf)
         recalcular(db, ufs=[validar_uf(uf)])
+        try:
+            from app.domain.recuperacao import conferir_ativos
+
+            conferir_ativos(db)
+        except Exception:  # noqa: BLE001 — a carga vale mesmo se a conferência falhar; o botão confere de novo
+            db.rollback()
+            logger.exception("Acompanhamentos de recuperação não conferidos depois da carga de %s", uf)
     return [r.__dict__ for r in resultados]
 
 
