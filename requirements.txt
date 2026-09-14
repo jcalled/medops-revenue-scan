@@ -1,0 +1,9 @@
+fastapi==0.115.2
+uvicorn==0.30.3
+python-jose==3.3.0
+httpx==0.28.1
+sqlalchemy>=2.0,<2.1
+psycopg2-binary
+alembic
+redis
+rq>=1.15
