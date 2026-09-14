@@ -77,6 +77,8 @@ def normalizar_aih(linha: dict[str, Any]) -> dict[str, Any] | None:
         "diarias_uti": _inteiro(linha.get("UTI_MES_TO")),
         "permanencia": _inteiro(linha.get("DIAS_PERM")),
         "marca_uti": _texto(linha.get("MARCA_UTI"))[:2] or None,
+        # 02 média complexidade, 03 alta.
+        "complexidade": _texto(linha.get("COMPLEX"))[:2],
     }
 
 

@@ -17,7 +17,12 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from typing import Any
+
+from sqlalchemy import (
+    JSON, BigInteger, Date, DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -26,6 +31,7 @@ from app.adapters.base import ClasseDado
 # BigInteger no Postgres (a tabela de AIH aprovadas passa de milhões de linhas
 # com várias UFs); Integer no SQLite, que só gera id automático para INTEGER.
 _ID = BigInteger().with_variant(Integer(), "sqlite")
+_JSON = JSON().with_variant(JSONB(), "postgresql")
 
 
 class Base(DeclarativeBase):
@@ -223,3 +229,184 @@ class SihErrorCode(_Publico, Base):
 
     codigo: Mapped[str] = mapped_column(String(6), primary_key=True)
     descricao: Mapped[str] = mapped_column(String(255), nullable=False)
+
+
+class SihHospitalProcedureMonth(_Publico, Base):
+    """
+    Produção aprovada por procedimento, hospital e mês.
+
+    É o que permite comparar hospital com hospital de igual para igual: o valor
+    médio e a permanência esperados de um hospital saem do mix de
+    procedimentos DELE, com a média dos semelhantes em cada procedimento.
+    """
+
+    __tablename__ = "sih_hospital_procedure_month"
+
+    id: Mapped[int] = mapped_column(_ID, primary_key=True)
+    uf: Mapped[str] = mapped_column(String(2), nullable=False)
+    cnes: Mapped[str] = mapped_column(String(7), nullable=False)
+    competencia: Mapped[str] = mapped_column(String(6), nullable=False)
+    proc_realizado: Mapped[str] = mapped_column(String(10), nullable=False)
+    # 02 média, 03 alta; vazio quando o arquivo não informa.
+    complexidade: Mapped[str] = mapped_column(String(2), nullable=False, default="")
+    aih: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    valor: Mapped[Decimal] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    diarias: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    diarias_uti: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    permanencia_dias: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("uf", "cnes", "competencia", "proc_realizado", "complexidade",
+                         name="uq_sih_hospital_procedure_month"),
+        Index("ix_sih_hospital_procedure_month_cnes", "cnes", "competencia"),
+        Index("ix_sih_hospital_procedure_month_proc", "proc_realizado", "competencia"),
+    )
+
+
+class CnesBed(_Publico, Base):
+    """Leitos do estabelecimento por código e tipo (arquivo LT do CNES)."""
+
+    __tablename__ = "cnes_beds"
+
+    id: Mapped[int] = mapped_column(_ID, primary_key=True)
+    uf: Mapped[str] = mapped_column(String(2), nullable=False)
+    competencia: Mapped[str] = mapped_column(String(6), nullable=False)
+    cnes: Mapped[str] = mapped_column(String(7), nullable=False)
+    codigo_leito: Mapped[str] = mapped_column(String(2), nullable=False)
+    # 1 cirúrgico, 2 clínico, 3 complementar (UTI/UCI), 4 obstétrico, 5 pediátrico,
+    # 6 outras especialidades, 7 hospital-dia.
+    tipo_leito: Mapped[str] = mapped_column(String(1), nullable=False)
+    qt_existente: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    qt_sus: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("uf", "competencia", "cnes", "codigo_leito", "tipo_leito", name="uq_cnes_beds"),
+        Index("ix_cnes_beds_cnes", "cnes", "competencia"),
+    )
+
+
+class CnesEnablement(_Publico, Base):
+    """Habilitação do estabelecimento, com vigência (arquivo HB do CNES)."""
+
+    __tablename__ = "cnes_enablements"
+
+    id: Mapped[int] = mapped_column(_ID, primary_key=True)
+    uf: Mapped[str] = mapped_column(String(2), nullable=False)
+    competencia: Mapped[str] = mapped_column(String(6), nullable=False)
+    cnes: Mapped[str] = mapped_column(String(7), nullable=False)
+    habilitacao: Mapped[str] = mapped_column(String(4), nullable=False)
+    competencia_inicio: Mapped[str] = mapped_column(String(6), nullable=False, default="")
+    competencia_fim: Mapped[str | None] = mapped_column(String(6))
+
+    __table_args__ = (
+        UniqueConstraint("uf", "competencia", "cnes", "habilitacao", "competencia_inicio", name="uq_cnes_enablements"),
+        Index("ix_cnes_enablements_cnes", "cnes", "competencia"),
+    )
+
+
+class PeerGroup(_Publico, Base):
+    """Hospitais semelhantes a um hospital num período, e por que foram escolhidos."""
+
+    __tablename__ = "peer_groups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cnes: Mapped[str] = mapped_column(String(7), nullable=False)
+    periodo_inicio: Mapped[str] = mapped_column(String(6), nullable=False)
+    periodo_fim: Mapped[str] = mapped_column(String(6), nullable=False)
+    # Filtros aplicados, alargamentos feitos e os atributos do hospital.
+    criterio: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False, default=dict)
+    gerado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    membros: Mapped[list[PeerGroupMember]] = relationship(
+        back_populates="grupo", cascade="all, delete-orphan", order_by="PeerGroupMember.distancia")
+    metricas: Mapped[list[BenchmarkMetric]] = relationship(back_populates="grupo", cascade="all, delete-orphan")
+
+    __table_args__ = (UniqueConstraint("cnes", "periodo_inicio", "periodo_fim", name="uq_peer_groups"),)
+
+
+class PeerGroupMember(_Publico, Base):
+    __tablename__ = "peer_group_members"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    peer_group_id: Mapped[int] = mapped_column(ForeignKey("peer_groups.id", ondelete="CASCADE"), nullable=False,
+                                               index=True)
+    cnes: Mapped[str] = mapped_column(String(7), nullable=False)
+    distancia: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    grupo: Mapped[PeerGroup] = relationship(back_populates="membros")
+
+
+class BenchmarkMetric(_Publico, Base):
+    """Um indicador do hospital contra os semelhantes: valor, mediana, quartis e percentil."""
+
+    __tablename__ = "benchmark_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    peer_group_id: Mapped[int] = mapped_column(ForeignKey("peer_groups.id", ondelete="CASCADE"), nullable=False,
+                                               index=True)
+    cnes: Mapped[str] = mapped_column(String(7), nullable=False)
+    metrica: Mapped[str] = mapped_column(String(40), nullable=False)
+    valor: Mapped[float | None] = mapped_column(Float)
+    mediana: Mapped[float | None] = mapped_column(Float)
+    p25: Mapped[float | None] = mapped_column(Float)
+    p75: Mapped[float | None] = mapped_column(Float)
+    # Posição do hospital entre os semelhantes, 0 a 100 (100 = maior valor).
+    percentil: Mapped[float | None] = mapped_column(Float)
+    n_pares: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    grupo: Mapped[PeerGroup] = relationship(back_populates="metricas")
+
+    __table_args__ = (UniqueConstraint("peer_group_id", "metrica", name="uq_benchmark_metrics"),)
+
+
+class Opportunity(_Publico, Base):
+    """
+    Oportunidade detectada pelo motor, com a prova.
+
+    `status` começa em ESTIMATED_OPPORTUNITY. Rejeição registrada no ER entra
+    como CONFIRMED: o SUS registrou a perda. IN_RECOVERY e RECOVERED dependem do
+    trabalho do hospital e ficam no acompanhamento do tenant, não aqui.
+    """
+
+    __tablename__ = "opportunities"
+
+    id: Mapped[int] = mapped_column(_ID, primary_key=True)
+    cnes: Mapped[str] = mapped_column(String(7), nullable=False)
+    periodo_inicio: Mapped[str] = mapped_column(String(6), nullable=False)
+    periodo_fim: Mapped[str] = mapped_column(String(6), nullable=False)
+    opportunity_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    categoria: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    unidade: Mapped[str] = mapped_column(String(12), nullable=False, default="R$")
+    observed_value: Mapped[float | None] = mapped_column(Float)
+    benchmark_value: Mapped[float | None] = mapped_column(Float)
+    gap: Mapped[float | None] = mapped_column(Float)
+    estimated_financial_impact: Mapped[Decimal | None] = mapped_column(Numeric(16, 2))
+    confidence_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    evidence: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False, default=dict)
+    recommended_action: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    gerado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_opportunities_cnes_periodo", "cnes", "periodo_inicio", "periodo_fim"),
+        Index("ix_opportunities_tipo", "opportunity_type"),
+    )
+
+
+class HospitalScore(_Publico, Base):
+    """Revenue Opportunity Score do hospital no período, para ranquear sem recalcular."""
+
+    __tablename__ = "hospital_scores"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cnes: Mapped[str] = mapped_column(String(7), nullable=False)
+    periodo_inicio: Mapped[str] = mapped_column(String(6), nullable=False)
+    periodo_fim: Mapped[str] = mapped_column(String(6), nullable=False)
+    score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    impacto_estimado: Mapped[Decimal] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    valor_apresentado: Mapped[Decimal] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    principal_tipo: Mapped[str | None] = mapped_column(String(40))
+    principal_categoria: Mapped[str | None] = mapped_column(String(40))
+    gerado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (UniqueConstraint("cnes", "periodo_inicio", "periodo_fim", name="uq_hospital_scores"),)

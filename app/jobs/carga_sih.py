@@ -34,7 +34,8 @@ from app.adapters.ibge import CODIGO_UF, validar_uf
 from app.adapters.sih import TIPOS, SihAdapter
 from app.adapters.sih_erros import ler_codigos_de_erro, obter_tab_sih
 from app.models import (
-    DataLoad, Establishment, SihApprovedAih, SihErrorCode, SihHospitalMonth, SihRejection, SihRejectionReason,
+    DataLoad, Establishment, SihApprovedAih, SihErrorCode, SihHospitalMonth, SihHospitalProcedureMonth, SihRejection,
+    SihRejectionReason,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,8 +92,19 @@ def carregar_competencia(db: Session, uf: str, competencia: str, adapters: dict[
         rejeitadas = {linha["n_aih"]: linha for linha in adapters["RJ"].ler(caminhos["RJ"])}
         motivos = {(linha["n_aih"], linha["codigo_erro"]): linha for linha in adapters["ER"].ler(caminhos["ER"])}
 
-        for modelo in (SihHospitalMonth, SihApprovedAih, SihRejection, SihRejectionReason):
+        for modelo in (SihHospitalMonth, SihHospitalProcedureMonth, SihApprovedAih, SihRejection, SihRejectionReason):
             db.execute(delete(modelo).where(modelo.uf == uf, modelo.competencia == competencia))
+
+        por_procedimento: dict[tuple[str, str, str], dict[str, Any]] = defaultdict(lambda: {
+            "aih": 0, "valor": 0.0, "diarias": 0, "diarias_uti": 0, "permanencia_dias": 0,
+        })
+        for linha in aprovadas.values():
+            p = por_procedimento[(linha["cnes"], linha["proc_realizado"] or "", linha.get("complexidade") or "")]
+            p["aih"] += 1
+            p["valor"] += linha["valor"]
+            p["diarias"] += linha["diarias"]
+            p["diarias_uti"] += linha["diarias_uti"]
+            p["permanencia_dias"] += linha["permanencia"]
 
         por_hospital: dict[str, dict[str, Any]] = defaultdict(lambda: {
             "aih_aprovadas": 0, "valor_aprovado": 0.0, "aih_rejeitadas": 0, "valor_rejeitado": 0.0,
@@ -114,6 +126,11 @@ def carregar_competencia(db: Session, uf: str, competencia: str, adapters: dict[
         _inserir(db, SihHospitalMonth, [
             {**base, "cnes": cnes, **{k: (round(v, 2) if isinstance(v, float) else v) for k, v in h.items()}}
             for cnes, h in por_hospital.items()
+        ])
+        _inserir(db, SihHospitalProcedureMonth, [
+            {**base, "cnes": cnes, "proc_realizado": proc, "complexidade": complexidade,
+             **{k: (round(v, 2) if isinstance(v, float) else v) for k, v in p.items()}}
+            for (cnes, proc, complexidade), p in por_procedimento.items()
         ])
         _inserir(db, SihApprovedAih, [{**base, "cnes": l["cnes"], "n_aih": l["n_aih"]} for l in aprovadas.values()])
         _inserir(db, SihRejection, [
@@ -246,16 +263,26 @@ def _codigos_sem_parar(db: Session, pasta_local: Path | None = None) -> int | No
 
 
 def job_carregar_uf(uf: str, competencias: list[str] | None = None, quantidade: int = 3) -> list[dict[str, Any]]:
-    """Entrada da fila (RQ): baixa do FTP e consulta a API do CNES."""
+    """
+    Entrada da fila (RQ): SIH do FTP, nomes pela API do CNES, leitos e
+    habilitações do CNES e o scan recalculado para a UF.
+    """
     from sqlalchemy.orm import sessionmaker
 
     from app.db import engine
+    from app.jobs.carga_cnes import carregar_cnes_uf
+    from app.jobs.recalcular import recalcular
 
     Sessao = sessionmaker(bind=engine(), expire_on_commit=False)
     with Sessao() as db, CnesDadosAbertos() as cnes_api:
         if db.execute(select(SihErrorCode.codigo).limit(1)).first() is None:
             _codigos_sem_parar(db)
         resultados = carregar_uf(db, uf, competencias=competencias, quantidade=quantidade, cnes_api=cnes_api)
+        try:
+            carregar_cnes_uf(db, uf)
+        except Exception:  # noqa: BLE001 — sem leitos o scan sai sem porte, mas sai
+            logger.exception("Leitos e habilitações do CNES de %s não carregados", uf)
+        recalcular(db, ufs=[validar_uf(uf)])
     return [r.__dict__ for r in resultados]
 
 

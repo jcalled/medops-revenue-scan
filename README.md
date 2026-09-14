@@ -15,8 +15,8 @@ de desenho estão em [ARQUITETURA.md](ARQUITETURA.md).
 |---|---|---|
 | 1 | Contrato de produtos no núcleo, menu por contrato, esqueleto deste serviço com o login compartilhado | feito |
 | 2 | Adapters SIH RD/RJ/ER, motivos e CNES; carga por UF (ou Brasil) no worker; organizações por planilha; ISGH; resumo por OSS | feito |
-| 3 | Motor de oportunidades e benchmark por peer group | próxima |
-| 4 | Painel da OSS, painel do hospital, modo apresentação | — |
+| 3 | Leitos e habilitações do CNES; mix de procedimentos; semelhantes por UF, porte, natureza e faixa de alta complexidade; RevenueOpportunityEngine; score; rotas de scan do hospital e ranking da OSS | feito |
+| 4 | Painel da OSS, painel do hospital, modo apresentação | próxima |
 | 5 | PDF executivo, prospecção, telas do SuperAdmin | — |
 | 6 | SIA/SUS, SP do SIH, ticket e mix; demais UFs | — |
 

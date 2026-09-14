@@ -20,7 +20,7 @@ from app.adapters.base import DataSourceAdapter, OrigemArquivo
 from app.adapters.datasus import ArquivoIndisponivel
 from app.domain.resumo import resumo
 from app.jobs.carga_sih import carregar_competencia, carregar_uf, competencias_para_carga
-from app.models import DataLoad, SihHospitalMonth, SihRejection, SihRejectionReason
+from app.models import DataLoad, SihHospitalMonth, SihHospitalProcedureMonth, SihRejection, SihRejectionReason
 
 HRVJ, HRC = "9672427", "6779522"
 
@@ -77,6 +77,9 @@ def test_cada_aih_conta_uma_vez_por_arquivo(fabrica_sessao, tmp_path):
     assert linhas[HRVJ].aih_aprovadas == 2 and float(linhas[HRVJ].valor_aprovado) == 1250.0  # a última linha vence
     assert linhas[HRVJ].aih_rejeitadas == 2 and float(linhas[HRVJ].valor_rejeitado) == 10000.0
     assert linhas[HRC].aih_rejeitadas == 0
+    with fabrica_sessao() as db:
+        [mix] = db.execute(select(SihHospitalProcedureMonth).where(SihHospitalProcedureMonth.cnes == HRVJ)).scalars()
+    assert (mix.proc_realizado, mix.aih, float(mix.valor), mix.permanencia_dias) == ("0303060212", 2, 1250.0, 6)
 
 
 def test_recarregar_substitui(fabrica_sessao, tmp_path):

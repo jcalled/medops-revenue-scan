@@ -31,6 +31,20 @@ def _escopo(acesso: Acesso) -> tuple[set[str] | None, set[str] | None, int | Non
     return siglas, cnes, escopo.get("period_months")
 
 
+def organizacao_no_escopo(db: Session, acesso: Acesso, organization_id: int) -> ManagementOrganization:
+    """A organização, se o contrato a alcança; 404 igual para inexistente e fora do escopo."""
+    siglas, cnes, _ = _escopo(acesso)
+    org = db.execute(
+        select(ManagementOrganization).where(ManagementOrganization.id == organization_id)
+        .options(selectinload(ManagementOrganization.unidades))
+    ).scalar_one_or_none()
+    fora = org is None or (siglas is not None and org.sigla.upper() not in siglas) \
+        or (cnes is not None and not any(u.cnes in cnes for u in org.unidades))
+    if fora:
+        raise HTTPException(status_code=404, detail="Organização não encontrada")
+    return org
+
+
 @router.get("/organizations")
 def listar_organizacoes(acesso: Acesso = Depends(require_revenue_scan), db: Session = Depends(get_db)) -> dict[str, Any]:
     siglas, cnes, _ = _escopo(acesso)
@@ -56,15 +70,8 @@ def resumo(
     acesso: Acesso = Depends(require_revenue_scan),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    siglas, cnes, limite = _escopo(acesso)
-    org = db.execute(
-        select(ManagementOrganization).where(ManagementOrganization.id == organization_id)
-        .options(selectinload(ManagementOrganization.unidades))
-    ).scalar_one_or_none()
-    fora = org is None or (siglas is not None and org.sigla.upper() not in siglas) \
-        or (cnes is not None and not any(u.cnes in cnes for u in org.unidades))
-    if fora:
-        raise HTTPException(status_code=404, detail="Organização não encontrada")
+    _, cnes, limite = _escopo(acesso)
+    org = organizacao_no_escopo(db, acesso, organization_id)
 
     lista = None
     if competencias:

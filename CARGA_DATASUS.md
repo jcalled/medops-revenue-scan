@@ -95,3 +95,63 @@ cadastro fica pronto para o mapeamento.
 `GET /api/revenue-scan/organizations/{id}/summary` devolve totais, meses,
 hospitais (com nome, sigla, perda líquida e principais motivos) e a ressalva de
 dado público, dentro do escopo do contrato do tenant.
+
+## Leitos e habilitações (CNES por UF)
+
+```bash
+python -m app.jobs.carga_cnes --uf CE            # competência mais recente publicada
+python -m app.jobs.carga_cnes --uf TODAS
+python -m app.jobs.carga_cnes --uf CE --competencia 202607 --pasta /dados/cnes
+```
+
+Arquivos `LT{UF}{AAMM}.dbc` (leitos existentes e SUS por código e tipo) e
+`HB{UF}{AAMM}.dbc` (habilitações com vigência), em
+`ftp://ftp.datasus.gov.br/dissemin/publicos/CNES/200508_/Dados/`. Dão o porte,
+a capacidade instalada e as habilitações usadas no scan.
+
+## Scan: semelhantes, oportunidades e score
+
+```bash
+python -m app.jobs.recalcular --uf CE            # refaz o scan dos hospitais do CE
+python -m app.jobs.recalcular --uf TODAS --meses 3
+```
+
+Os semelhantes vêm de **todos** os hospitais carregados, de qualquer UF; `--uf`
+só escolhe de quais hospitais o scan é refeito. Quanto mais UFs carregadas,
+mais estrito o filtro consegue ficar:
+
+1. mesma UF, porte, natureza jurídica e faixa de alta complexidade;
+2. mesma região, com os mesmos critérios;
+3. mesma região, porte e faixa;
+4. Brasil, porte e faixa; depois Brasil só com a faixa;
+5. sem faixa, como último recurso.
+
+Dentro do filtro ficam os até 15 mais parecidos em mix de procedimentos, volume
+e alta complexidade. Com só o Ceará carregado, o HRVJ é comparado com o HR
+Sertão Central, IJF, HGF e Santa Casa — hospitais da mesma faixa de alta
+complexidade, não os distritais do mesmo número de leitos.
+
+O motor separa dois tipos de oportunidade, e as rotas somam cada um à parte:
+
+- **Confirmada** — rejeição registrada pelo SUS, por categoria de motivo. O
+  impacto é só a parte acima do que os semelhantes perdem na mesma categoria.
+- **Sinal estimado** — valor médio por AIH e permanência comparados no mesmo
+  procedimento, leitos ociosos, queda de produção, alta complexidade abaixo dos
+  semelhantes (este sem valor).
+
+Ceará, 232 hospitais, 3 competências: o recálculo leva cerca de 1 segundo.
+
+Rotas:
+
+- `GET /api/revenue-scan/hospitals/{cnes}/scan` — cabeçalho do hospital,
+  score, semelhantes com o critério usado, indicadores com mediana, quartis e
+  percentil, e as oportunidades com evidência e ação.
+- `GET /api/revenue-scan/organizations/{id}/opportunities` — ranking dos
+  hospitais da organização (score, impacto confirmado, sinais, principal
+  problema) e a rejeição do período.
+
+## Tudo de uma vez, pela fila
+
+`enfileirar_carga_uf("CE")` carrega o SIH, os nomes pelo CNES, os leitos e
+habilitações e recalcula o scan da UF. Leitos que não carregarem não impedem o
+scan: o hospital sai sem porte e é comparado nos filtros mais largos.
