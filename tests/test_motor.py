@@ -176,6 +176,19 @@ def test_alta_complexidade_e_sinal_sem_valor():
     assert sinal["estimated_financial_impact"] is None and sinal["status"] == "ESTIMATED_OPPORTUNITY"
 
 
+def test_sinal_nao_passa_de_metade_do_apresentado_e_pesa_menos():
+    """Um filantrópico do Ceará saía com R$ 12,8 mi de "leitos pouco usados", mais que a produção."""
+    pares = [perfil(f"10000{i:02d}", leitos=300, diarias=22_080) for i in range(6)]      # 80%
+    ocioso = perfil("0000001", leitos=300, diarias=1_000)                                # ~4%, mesmo valor médio
+    analise = motor(ocioso, *pares).analisar("0000001")
+    assert [o["opportunity_type"] for o in analise.oportunidades] == ["CAPACITY_UNDERUTILIZATION"]
+    [sinal] = analise.oportunidades
+    assert sinal["estimated_financial_impact"] == 900_000.0                               # metade de R$ 1,8 mi
+    assert sinal["evidence"]["impacto_limitado"] is True and sinal["evidence"]["impacto_calculado"] > 900_000.0
+    # 900 mil × confiança 30% × peso 0,5 = 135 mil, sobre 25% de 1,8 mi = 30.
+    assert analise.score == 30
+
+
 def test_score_entre_zero_e_cem():
     alvo = perfil("0000001", perdas=_perdas(3_000_000.0), rejeitado=3_000_000.0, valor=500_000.0)
     pares = [perfil(f"10000{i:02d}") for i in range(6)]

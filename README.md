@@ -36,6 +36,25 @@ o contrato.
 No frontend, defina `NEXT_PUBLIC_REVENUE_SCAN_URL` (padrão
 `http://localhost:8100`). A entrada do produto é `/revenue-scan`.
 
+## Recortes
+
+Qualquer conjunto de hospitais do SUS carregados, dentro do escopo do contrato:
+
+- `GET /api/revenue-scan/filters` — estados, municípios, naturezas, gestões,
+  portes e organizações que existem nos dados, com quantos hospitais cada um tem;
+- `GET /api/revenue-scan/hospitals` — lista paginada e ordenável;
+- `GET /api/revenue-scan/panorama` — o painel executivo do recorte.
+
+Filtros em comum: `organizacao`, `uf`, `municipio` (código do CNES),
+`natureza` (`MUNICIPAL` prefeitura, `ESTADUAL`, `FEDERAL`, `EMPRESA_PUBLICA`,
+`FILANTROPICO`, `PRIVADO`), `gestao` (`MUNICIPAL`, `ESTADUAL`), `porte`, `q`
+(nome ou CNES) e `cnes` (seleção separada por vírgula). `ordem`: `score`,
+`confirmado`, `sinais`, `apresentado`, `nome`.
+
+Natureza vem da natureza jurídica do CNES (de quem é o hospital); gestão, da
+esfera administrativa (quem faz a gestão do contrato SUS). Hospital estadual
+gerido por OSS é `ESTADUAL` e aparece na OSS pelo vínculo cadastrado.
+
 ## Carga de dados
 
 Ver [CARGA_DATASUS.md](CARGA_DATASUS.md): qualquer UF ou o Brasil inteiro, e

@@ -51,6 +51,12 @@ LIMIAR_OCIOSIDADE, MIN_LEITOS_OCIOSIDADE = 0.6, 10
 LIMIAR_QUEDA, MIN_AIH_MES_QUEDA = 0.75, 50
 # Oportunidade ponderada pela confiança igual a 25% do apresentado vale score 100.
 ESCALA_SCORE = 0.25
+# Sinal estimado não passa de metade do que o hospital apresentou no período, e
+# pesa metade no score. No Ceará, "leitos pouco usados" de um filantrópico saía
+# com R$ 12,8 mi — mais que a produção dele — e punha o hospital no topo do
+# ranking à frente de rejeições registradas pelo SUS.
+TETO_SINAL = 0.5
+PESO_SINAL = 0.5
 
 _Filtro = Callable[[Perfil, Perfil], bool]
 
@@ -175,6 +181,12 @@ class RevenueOpportunityEngine:
                 self._alta_complexidade(alvo, amplos),
             ) if o),
         ]
+        teto = TETO_SINAL * alvo.valor_apresentado
+        for o in oportunidades:
+            valor = o["estimated_financial_impact"]
+            if o["status"] == ESTIMADA and valor is not None and valor > teto:
+                o["evidence"] = {**o["evidence"], "impacto_calculado": valor, "impacto_limitado": True}
+                o["estimated_financial_impact"] = round(teto, 2)
         oportunidades.sort(key=lambda o: -(o["estimated_financial_impact"] or 0))
         score, impacto, principal = self._score(alvo, oportunidades)
         return Analise(
@@ -419,12 +431,14 @@ class RevenueOpportunityEngine:
 
     @staticmethod
     def _ponderado(oportunidade: dict[str, Any]) -> float:
-        return float(oportunidade["estimated_financial_impact"] or 0) * oportunidade["confidence_score"] / 100
+        peso = 1.0 if oportunidade["status"] == CONFIRMADA else PESO_SINAL
+        return float(oportunidade["estimated_financial_impact"] or 0) * oportunidade["confidence_score"] / 100 * peso
 
     def _score(self, alvo: Perfil, oportunidades: list[dict[str, Any]]) -> tuple[int, float, dict[str, Any] | None]:
         """
         Revenue Opportunity Score, 0 a 100: oportunidade ponderada pela confiança
-        sobre o valor apresentado, com 25% do apresentado valendo 100.
+        (sinal estimado com metade do peso) sobre o valor apresentado, com 25% do
+        apresentado valendo 100.
         """
         impacto = sum(float(o["estimated_financial_impact"] or 0) for o in oportunidades)
         ponderado = sum(self._ponderado(o) for o in oportunidades)

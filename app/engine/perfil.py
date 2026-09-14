@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.adapters.ibge import CODIGO_UF
+from app.domain.classificacao import gestao
 from app.domain.resumo import _lotes
 from app.engine.categorias import categorizar
 from app.models import (
@@ -78,6 +79,9 @@ class Perfil:
     cnes: str
     uf: str = ""
     natureza: str = "não informada"
+    natureza_codigo: str | None = None
+    codigo_municipio: str | None = None
+    gestao: str | None = None
     leitos_sus: int = 0
     leitos_sus_gerais: int = 0
     leitos_uti_sus: int = 0
@@ -211,10 +215,13 @@ def montar_perfis(db: Session, competencias: list[str]) -> dict[str, Perfil]:
         atualizar_mix(p)
 
     for lote in _lotes(list(perfis)):
-        for cnes, codigo in db.execute(
-            select(Establishment.cnes, Establishment.natureza_juridica).where(Establishment.cnes.in_(lote))
+        for cnes, codigo, municipio, esfera in db.execute(
+            select(Establishment.cnes, Establishment.natureza_juridica, Establishment.codigo_municipio,
+                   Establishment.esfera).where(Establishment.cnes.in_(lote))
         ):
-            perfis[cnes].natureza = natureza(codigo)
+            p = perfis[cnes]
+            p.natureza, p.natureza_codigo = natureza(codigo), codigo
+            p.codigo_municipio, p.gestao = municipio, gestao(esfera)
 
     # Leitos e habilitações: a competência mais recente do CNES de cada hospital.
     ultimo_lt = dict(db.execute(select(CnesBed.cnes, func.max(CnesBed.competencia)).group_by(CnesBed.cnes)).all())

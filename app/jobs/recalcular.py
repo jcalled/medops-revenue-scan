@@ -19,8 +19,9 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.domain.classificacao import grupo_natureza
 from app.domain.resumo import _lotes, competencias_carregadas
-from app.engine.motor import RevenueOpportunityEngine
+from app.engine.motor import CONFIRMADA, RevenueOpportunityEngine
 from app.engine.perfil import montar_perfis
 from app.jobs.carga_sih import ufs_do_argumento
 from app.models import BenchmarkMetric, HospitalScore, Opportunity, PeerGroup, PeerGroupMember
@@ -57,10 +58,16 @@ def recalcular(db: Session, *, ufs: list[str] | None = None, competencias: list[
         db.add(grupo)
         db.add_all(Opportunity(cnes=cnes, periodo_inicio=inicio, periodo_fim=fim, **o) for o in analise.oportunidades)
         p = perfis[cnes]
+        confirmado = sum(float(o["estimated_financial_impact"] or 0)
+                         for o in analise.oportunidades if o["status"] == CONFIRMADA)
         db.add(HospitalScore(
             cnes=cnes, periodo_inicio=inicio, periodo_fim=fim, score=analise.score,
             impacto_estimado=analise.impacto_estimado, valor_apresentado=round(p.valor_apresentado, 2),
             principal_tipo=analise.principal_tipo, principal_categoria=analise.principal_categoria,
+            impacto_confirmado=round(confirmado, 2), impacto_sinais=round(analise.impacto_estimado - confirmado, 2),
+            uf=p.uf, codigo_municipio=p.codigo_municipio, natureza_codigo=p.natureza_codigo,
+            natureza_grupo=grupo_natureza(p.natureza_codigo), gestao=p.gestao, porte=p.porte,
+            leitos_sus=p.leitos_sus,
         ))
         total_oportunidades += len(analise.oportunidades)
         if i % _COMMIT_A_CADA == 0:

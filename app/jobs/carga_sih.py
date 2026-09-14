@@ -274,9 +274,17 @@ def job_carregar_uf(uf: str, competencias: list[str] | None = None, quantidade: 
     from app.jobs.recalcular import recalcular
 
     Sessao = sessionmaker(bind=engine(), expire_on_commit=False)
+    from app.jobs.carga_ibge import carregar_municipios
+    from app.models import Municipality
+
     with Sessao() as db, CnesDadosAbertos() as cnes_api:
         if db.execute(select(SihErrorCode.codigo).limit(1)).first() is None:
             _codigos_sem_parar(db)
+        if db.execute(select(Municipality.codigo).limit(1)).first() is None:
+            try:
+                carregar_municipios(db)
+            except Exception:  # noqa: BLE001 — sem nomes o município aparece pelo código
+                logger.exception("Municípios do IBGE não carregados")
         resultados = carregar_uf(db, uf, competencias=competencias, quantidade=quantidade, cnes_api=cnes_api)
         try:
             carregar_cnes_uf(db, uf)

@@ -407,6 +407,30 @@ class HospitalScore(_Publico, Base):
     valor_apresentado: Mapped[Decimal] = mapped_column(Numeric(16, 2), nullable=False, default=0)
     principal_tipo: Mapped[str | None] = mapped_column(String(40))
     principal_categoria: Mapped[str | None] = mapped_column(String(40))
+    # Atributos do hospital no cálculo, para filtrar e ordenar sem recalcular.
+    impacto_confirmado: Mapped[Decimal] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    impacto_sinais: Mapped[Decimal] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    uf: Mapped[str | None] = mapped_column(String(2))
+    codigo_municipio: Mapped[str | None] = mapped_column(String(7))
+    natureza_codigo: Mapped[str | None] = mapped_column(String(4))
+    natureza_grupo: Mapped[str | None] = mapped_column(String(20))
+    gestao: Mapped[str | None] = mapped_column(String(20))
+    porte: Mapped[str | None] = mapped_column(String(30))
+    leitos_sus: Mapped[int | None] = mapped_column(Integer)
     gerado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    __table_args__ = (UniqueConstraint("cnes", "periodo_inicio", "periodo_fim", name="uq_hospital_scores"),)
+    __table_args__ = (
+        UniqueConstraint("cnes", "periodo_inicio", "periodo_fim", name="uq_hospital_scores"),
+        Index("ix_hospital_scores_uf_natureza", "uf", "natureza_grupo"),
+    )
+
+
+class Municipality(_Publico, Base):
+    """Município do IBGE. O CNES e o SIH usam os 6 primeiros dígitos do código."""
+
+    __tablename__ = "municipalities"
+
+    codigo: Mapped[str] = mapped_column(String(7), primary_key=True)
+    codigo_cnes: Mapped[str] = mapped_column(String(6), nullable=False, unique=True)
+    nome: Mapped[str] = mapped_column(String(120), nullable=False)
+    uf: Mapped[str] = mapped_column(String(2), nullable=False)
