@@ -21,6 +21,7 @@ from app.engine.categorias import POR_CODIGO
 from app.engine.motor import CONFIRMADA, ROTULOS_TIPO
 from app.models import (
     Establishment, HospitalScore, ManagementOrganization, Opportunity, OrganizationEstablishment, PeerGroup,
+    SihErrorCode,
 )
 
 router = APIRouter(prefix="/api/revenue-scan", tags=["scan"])
@@ -107,7 +108,11 @@ def _principal(tipo: str | None, categoria: str | None) -> str | None:
     return ROTULOS_TIPO.get(tipo or "", tipo)
 
 
-def _oportunidade(o: Opportunity) -> dict[str, Any]:
+def _oportunidade(o: Opportunity, descricoes: dict[str, str] | None = None) -> dict[str, Any]:
+    evidencia = dict(o.evidence or {})
+    if evidencia.get("motivos"):
+        # Código sozinho ("060082") não diz nada a quem lê o scan.
+        evidencia["motivos"] = [{**m, "descricao": (descricoes or {}).get(m.get("codigo"))} for m in evidencia["motivos"]]
     return {
         "id": o.id, "opportunity_type": o.opportunity_type, "categoria": o.categoria or None,
         "titulo": (o.evidence or {}).get("titulo") or _principal(o.opportunity_type, o.categoria),
@@ -115,7 +120,7 @@ def _oportunidade(o: Opportunity) -> dict[str, Any]:
         "benchmark_value": o.benchmark_value, "gap": o.gap,
         "estimated_financial_impact": float(o.estimated_financial_impact) if o.estimated_financial_impact is not None
         else None,
-        "confidence_score": o.confidence_score, "evidence": o.evidence, "recommended_action": o.recommended_action,
+        "confidence_score": o.confidence_score, "evidence": evidencia, "recommended_action": o.recommended_action,
     }
 
 
@@ -146,6 +151,10 @@ def scan_do_hospital(cnes: str, acesso: Acesso = Depends(require_revenue_scan),
         select(ManagementOrganization.sigla, OrganizationEstablishment.sigla).join(OrganizationEstablishment)
         .where(OrganizationEstablishment.cnes == numero)
     ).all()
+    codigos = {m.get("codigo") for o in oportunidades for m in (o.evidence or {}).get("motivos", [])}
+    descricoes = dict(db.execute(
+        select(SihErrorCode.codigo, SihErrorCode.descricao).where(SihErrorCode.codigo.in_(codigos or {"-"}))
+    ).all())
     criterio = grupo.criterio if grupo else {}
     atributos = criterio.get("atributos", {})
     metricas = {m.metrica: m for m in (grupo.metricas if grupo else [])}
@@ -183,7 +192,7 @@ def scan_do_hospital(cnes: str, acesso: Acesso = Depends(require_revenue_scan),
                 if nome in metricas else {})}
             for nome, (rotulo, unidade) in INDICADORES.items()
         ],
-        "oportunidades": [_oportunidade(o) for o in oportunidades],
+        "oportunidades": [_oportunidade(o, descricoes) for o in oportunidades],
         "classe_dado": "PUBLICO",
         "ressalva": RESSALVA,
     }

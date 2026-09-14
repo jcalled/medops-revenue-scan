@@ -88,6 +88,7 @@ class Perfil:
     valor_aprovado: float = 0.0
     valor_rejeitado: float = 0.0
     diarias: int = 0
+    diarias_uti: int = 0
     permanencia_dias: int = 0
     aih_alta_complexidade: int = 0
     # competência -> {aih_aprovadas, valor_aprovado, aih_rejeitadas, valor_rejeitado}
@@ -142,8 +143,10 @@ class Perfil:
 
     @property
     def ocupacao(self) -> float | None:
+        # Diária de UTI ocupa leito complementar, que não está na capacidade dos
+        # leitos gerais; contá-la aqui inflava a ocupação dos hospitais com UTI.
         capacidade = self.leitos_sus_gerais * self.dias_periodo
-        return self.diarias / capacidade if capacidade else None
+        return max(0, self.diarias - self.diarias_uti) / capacidade if capacidade else None
 
     @property
     def taxa_rejeicao_valor(self) -> float | None:
@@ -177,6 +180,7 @@ def montar_perfis(db: Session, competencias: list[str]) -> dict[str, Perfil]:
         p.valor_aprovado += float(linha.valor_aprovado or 0)
         p.valor_rejeitado += float(linha.valor_rejeitado or 0)
         p.diarias += linha.diarias
+        p.diarias_uti += linha.diarias_uti
         p.permanencia_dias += linha.permanencia_dias
         mes = p.meses.setdefault(linha.competencia, {"aih_aprovadas": 0, "valor_aprovado": 0.0,
                                                      "aih_rejeitadas": 0, "valor_rejeitado": 0.0})
