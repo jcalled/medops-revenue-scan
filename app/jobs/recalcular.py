@@ -77,6 +77,16 @@ def recalcular(db: Session, *, ufs: list[str] | None = None, competencias: list[
     return {"competencias": lista, "hospitais": len(alvos), "oportunidades": total_oportunidades}
 
 
+def job_recalcular(ufs: list[str] | None = None, meses: int = 3) -> dict[str, Any]:
+    """Entrada da fila (RQ): refaz semelhantes, oportunidades e score sem baixar nada."""
+    from sqlalchemy.orm import sessionmaker
+
+    from app.db import engine
+
+    with sessionmaker(bind=engine(), expire_on_commit=False)() as db:
+        return recalcular(db, ufs=ufs, meses=meses)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Recalcula o scan (semelhantes, oportunidades e score).")
     parser.add_argument("--uf", default="TODAS", help="UFs separadas por vírgula ou TODAS (padrão)")
