@@ -66,9 +66,12 @@ def _json(db: Session, t: RecoveryTracking, com_itens: bool = False) -> dict[str
     if com_itens:
         proximo = rec.mais_meses(ultimo, 1) if ultimo else None
         descricoes = rec.descricoes_de_motivos(db)
-        # Em aberto primeiro, pelo prazo mais curto e pelo maior valor; depois as recuperadas, das mais recentes.
-        abertas = sorted((i for i in t.itens if i.situacao == rec.ABERTA),
-                         key=lambda i: (rec.prazo_estimado(i.dt_saida) or "999999", -float(i.valor_rejeitado or 0)))
+        # Fila de trabalho: em aberto que vencem no próximo processamento, depois as demais pelo prazo e
+        # pelo valor, as de prazo vencido por último; em seguida as recuperadas, das mais recentes.
+        ordem_prazo = {"VENCENDO": 0, None: 1, "VENCIDO": 2}
+        abertas = sorted((i for i in t.itens if i.situacao == rec.ABERTA), key=lambda i: (
+            ordem_prazo[rec.situacao_do_prazo(i, proximo)], rec.prazo_estimado(i.dt_saida) or "999999",
+            -float(i.valor_rejeitado or 0)))
         recuperadas = sorted((i for i in t.itens if i.situacao != rec.ABERTA),
                              key=lambda i: (i.competencia_aprovacao or "", float(i.valor_rejeitado or 0)), reverse=True)
         corpo["itens"] = [rec.item_json(i, nomes, descricoes, proximo) for i in abertas + recuperadas]
