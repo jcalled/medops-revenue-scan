@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.ibge import CODIGO_UF, validar_uf
 from app.api.deps import Acesso, require_revenue_scan
+from app.config import get_settings
 from app.db import get_db
 from app.jobs import carga_sih
 from app.jobs import fila as fila_jobs
@@ -168,3 +169,23 @@ def enfileirar_recalculo(pedido: PedidoRecalculo, _: Acesso = Depends(require_ad
         return {"id": fila_jobs.enfileirar_recalculo(ufs)}
     except Exception as exc:  # noqa: BLE001
         raise _fila_fora(exc) from exc
+
+
+class PedidoPrevencao(BaseModel):
+    ufs: list[str] = Field(min_length=1)
+
+
+@router.post("/prevention", status_code=status.HTTP_202_ACCEPTED)
+def enfileirar_prevencao(pedido: PedidoPrevencao, _: Acesso = Depends(require_admin_plataforma)) -> dict[str, Any]:
+    """O FaturaSUS do núcleo avalia as AIH rejeitadas já carregadas das UFs."""
+    if len(get_settings().internal_service_token) < 32:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            detail="A prevenção precisa da chave INTERNAL_SERVICE_TOKEN, a mesma no .env do núcleo "
+                                   "e no do Revenue Scan.")
+    ufs = _ufs(pedido.ufs)
+    try:
+        ocupadas = _em_andamento("PREVENCAO")
+        trabalhos = [{"uf": uf, "id": fila_jobs.enfileirar_prevencao(uf)} for uf in ufs if uf not in ocupadas]
+    except Exception as exc:  # noqa: BLE001
+        raise _fila_fora(exc) from exc
+    return {"trabalhos": trabalhos, "ignoradas": sorted(set(ufs) & ocupadas)}

@@ -20,7 +20,8 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
-    JSON, BigInteger, Date, DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint,
+    JSON, BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -197,6 +198,11 @@ class SihRejection(_Publico, Base):
     dt_internacao: Mapped[date | None] = mapped_column(Date)
     dt_saida: Mapped[date | None] = mapped_column(Date)
     marca_uti: Mapped[str | None] = mapped_column(String(2))
+    # Campos do RJ que o FaturaSUS lê, e as diárias do mesmo hospital e mês apresentadas antes desta AIH na
+    # remessa: é o que a prevenção manda ao motor para dizer se ele teria pegado a rejeição.
+    campos: Mapped[dict[str, Any] | None] = mapped_column(_JSON)
+    diarias_antes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    diarias_uti_antes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     __table_args__ = (
         UniqueConstraint("uf", "n_aih", "competencia", name="uq_sih_rejections"),
@@ -579,3 +585,32 @@ class ProspectEvent(_Privado, Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     prospect: Mapped[Prospect] = relationship(back_populates="eventos")
+
+
+class SihPrevention(_Publico, Base):
+    """
+    O que o FaturaSUS diz de uma AIH rejeitada: se a regra do motivo teria
+    disparado antes do envio. Refeito a cada carga da competência.
+    """
+
+    __tablename__ = "sih_prevention"
+
+    id: Mapped[int] = mapped_column(_ID, primary_key=True)
+    uf: Mapped[str] = mapped_column(String(2), nullable=False)
+    competencia: Mapped[str] = mapped_column(String(6), nullable=False)
+    cnes: Mapped[str] = mapped_column(String(7), nullable=False)
+    n_aih: Mapped[str] = mapped_column(String(13), nullable=False)
+    # PEGARIA | CONFERIVEL_NAO_PEGOU | PRECISA_ARQUIVO | SEM_REGRA | GESTOR | SEM_MOTIVO
+    grupo: Mapped[str] = mapped_column(String(30), nullable=False)
+    pegaria: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    motivos: Mapped[list[dict[str, Any]]] = mapped_column(_JSON, nullable=False, default=list)
+    falhas: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    avisos: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    mensagens: Mapped[list[dict[str, Any]]] = mapped_column(_JSON, nullable=False, default=list)
+    referencias: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False, default=dict)
+    avaliado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("uf", "n_aih", "competencia", name="uq_sih_prevention"),
+        Index("ix_sih_prevention_cnes_competencia", "cnes", "competencia"),
+    )

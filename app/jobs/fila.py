@@ -49,6 +49,16 @@ def enfileirar_recalculo(ufs: list[str] | None = None) -> str:
     return job.id
 
 
+def enfileirar_prevencao(uf: str) -> str:
+    job = fila().enqueue(
+        "app.jobs.prevencao.job_prevencao_uf", uf, None,
+        job_timeout="2h", result_ttl=GUARDAR_POR, failure_ttl=GUARDAR_POR,
+        description=f"Prevenção FaturaSUS · {uf}",
+        meta={"tipo": "PREVENCAO", "ufs": [uf]},
+    )
+    return job.id
+
+
 def _iso(valor: Any) -> str | None:
     return valor.isoformat() if valor else None
 

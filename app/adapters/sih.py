@@ -79,7 +79,22 @@ def normalizar_aih(linha: dict[str, Any]) -> dict[str, Any] | None:
         "marca_uti": _texto(linha.get("MARCA_UTI"))[:2] or None,
         # 02 média complexidade, 03 alta.
         "complexidade": _texto(linha.get("COMPLEX"))[:2],
+        # Ordem da AIH no lote do hospital: é como o SIH soma diárias contra a capacidade.
+        "remessa": _texto(linha.get("REMESSA")),
+        "sequencia": _inteiro(linha.get("SEQUENCIA")),
     }
+
+
+# O que o FaturaSUS lê de uma AIH do RJ para dizer se teria pegado a rejeição antes do envio.
+CAMPOS_FATURSUS = (
+    "N_AIH", "IDENT", "CNES", "CGC_HOSP", "MES_CMPT", "ANO_CMPT", "DT_INTER", "DT_SAIDA", "COBRANCA", "PROC_SOLIC",
+    "PROC_REA", "ESPEC", "CAR_INT", "DIAG_PRINC", "DIAG_SECUN", "CID_ASSO", "CID_MORTE", "SEXO", "NASC",
+    "UTI_MES_TO", "MARCA_UTI", "DIAR_ACOM", "QT_DIARIAS", "VAL_TOT", "VAL_SH", "VAL_SP",
+)
+
+
+def campos_fatursus(linha: dict[str, Any]) -> dict[str, str]:
+    return {campo: _texto(linha.get(campo)) for campo in CAMPOS_FATURSUS if _texto(linha.get(campo))}
 
 
 def normalizar_erro(linha: dict[str, Any]) -> dict[str, Any] | None:
@@ -134,4 +149,7 @@ class SihAdapter(DataSourceAdapter):
         for linha in self._ler(caminho):
             normalizada = normalizar(linha)
             if normalizada:
+                if self.tipo == "RJ":
+                    # Só nas rejeitadas: é o que vai ao FaturaSUS, e o RD de SP passa de 250 mil linhas.
+                    normalizada["campos"] = campos_fatursus(linha)
                 yield normalizada

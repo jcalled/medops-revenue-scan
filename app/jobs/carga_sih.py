@@ -34,8 +34,8 @@ from app.adapters.ibge import CODIGO_UF, validar_uf
 from app.adapters.sih import TIPOS, SihAdapter
 from app.adapters.sih_erros import ler_codigos_de_erro, obter_tab_sih
 from app.models import (
-    DataLoad, Establishment, SihApprovedAih, SihErrorCode, SihHospitalMonth, SihHospitalProcedureMonth, SihRejection,
-    SihRejectionReason,
+    DataLoad, Establishment, SihApprovedAih, SihErrorCode, SihHospitalMonth, SihHospitalProcedureMonth, SihPrevention,
+    SihRejection, SihRejectionReason,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,6 +58,45 @@ def _agora() -> datetime:
 
 def adapters_padrao(pasta_local: Path | None = None) -> dict[str, DataSourceAdapter]:
     return {tipo: SihAdapter(tipo, pasta_local=pasta_local) for tipo in TIPOS}
+
+
+def _diarias_estimadas(linha: dict[str, Any], rejeitada: bool) -> int:
+    if linha.get("diarias") or not rejeitada:
+        return int(linha.get("diarias") or 0)
+    # O DATASUS zera as diárias das rejeitadas; as datas ficam — é o que o hospital lançou.
+    if linha.get("dt_internacao") and linha.get("dt_saida"):
+        return max(1, (linha["dt_saida"] - linha["dt_internacao"]).days)
+    return 0
+
+
+def acumulado_do_lote(aprovadas: dict[str, dict[str, Any]], rejeitadas: dict[str, dict[str, Any]]
+                      ) -> tuple[dict[str, int], dict[str, int]]:
+    """
+    Para cada AIH rejeitada, as diárias do mesmo hospital e mês de atendimento
+    apresentadas antes dela, na ordem da remessa — e as de UTI do mesmo tipo.
+
+    É o que o FaturaSUS somaria no arquivo do hospital: capacidade instalada só
+    se afirma com o lote. AIH nos dois arquivos vale como rejeitada.
+    """
+    lote = {n: (l, False) for n, l in aprovadas.items()}
+    lote.update({n: (l, True) for n, l in rejeitadas.items()})
+    ordem = sorted(lote.values(), key=lambda t: (t[0]["cnes"], t[0].get("competencia_aih") or "",
+                                                  t[0].get("remessa") or "", t[0].get("sequencia") or 0))
+    soma: dict[tuple[str, str], int] = defaultdict(int)
+    soma_uti: dict[tuple[str, str, str], int] = defaultdict(int)
+    antes: dict[str, int] = {}
+    antes_uti: dict[str, int] = {}
+    for linha, rejeitada in ordem:
+        chave = (linha["cnes"], linha.get("competencia_aih") or "")
+        uti = int(linha.get("diarias_uti") or 0)
+        tipo = linha.get("marca_uti") if uti and linha.get("marca_uti") not in (None, "", "00") else None
+        if rejeitada:
+            antes[linha["n_aih"]] = soma[chave]
+            antes_uti[linha["n_aih"]] = soma_uti[(*chave, tipo)] if tipo else 0
+        soma[chave] += _diarias_estimadas(linha, rejeitada)
+        if tipo:
+            soma_uti[(*chave, tipo)] += uti
+    return antes, antes_uti
 
 
 def _inserir(db: Session, modelo: type, linhas: list[dict[str, Any]]) -> None:
@@ -91,8 +130,10 @@ def carregar_competencia(db: Session, uf: str, competencia: str, adapters: dict[
         aprovadas = {linha["n_aih"]: linha for linha in adapters["RD"].ler(caminhos["RD"])}
         rejeitadas = {linha["n_aih"]: linha for linha in adapters["RJ"].ler(caminhos["RJ"])}
         motivos = {(linha["n_aih"], linha["codigo_erro"]): linha for linha in adapters["ER"].ler(caminhos["ER"])}
+        antes, antes_uti = acumulado_do_lote(aprovadas, rejeitadas)
 
-        for modelo in (SihHospitalMonth, SihHospitalProcedureMonth, SihApprovedAih, SihRejection, SihRejectionReason):
+        for modelo in (SihHospitalMonth, SihHospitalProcedureMonth, SihApprovedAih, SihRejection, SihRejectionReason,
+                       SihPrevention):
             db.execute(delete(modelo).where(modelo.uf == uf, modelo.competencia == competencia))
 
         por_procedimento: dict[tuple[str, str, str], dict[str, Any]] = defaultdict(lambda: {
@@ -137,7 +178,8 @@ def carregar_competencia(db: Session, uf: str, competencia: str, adapters: dict[
         _inserir(db, SihRejection, [
             {**base, "cnes": l["cnes"], "n_aih": l["n_aih"], "competencia_aih": l["competencia_aih"],
              "proc_realizado": l["proc_realizado"], "valor": l["valor"], "dt_internacao": l["dt_internacao"],
-             "dt_saida": l["dt_saida"], "marca_uti": l["marca_uti"]}
+             "dt_saida": l["dt_saida"], "marca_uti": l["marca_uti"], "campos": l.get("campos"),
+             "diarias_antes": antes.get(l["n_aih"], 0), "diarias_uti_antes": antes_uti.get(l["n_aih"], 0)}
             for l in rejeitadas.values()
         ])
         _inserir(db, SihRejectionReason, [
@@ -299,6 +341,16 @@ def job_carregar_uf(uf: str, competencias: list[str] | None = None, quantidade: 
         except Exception:  # noqa: BLE001 — a carga vale mesmo se a conferência falhar; o botão confere de novo
             db.rollback()
             logger.exception("Acompanhamentos de recuperação não conferidos depois da carga de %s", uf)
+        try:
+            from app.jobs.prevencao import motor_padrao, rodar
+
+            motor = motor_padrao()
+            if motor is not None:
+                with motor:
+                    rodar(db, uf, [r.competencia for r in resultados], motor)
+        except Exception:  # noqa: BLE001 — a carga vale sem a prevenção; ela roda de novo pela tela de dados
+            db.rollback()
+            logger.exception("Prevenção do FaturaSUS não rodou depois da carga de %s", uf)
     return [r.__dict__ for r in resultados]
 
 

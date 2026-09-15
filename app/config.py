@@ -33,6 +33,8 @@ class Settings:
     # Conexões por processo (API e worker): o Postgres gerenciado tem limite e o GlosaAI divide o mesmo.
     db_pool_size: int = 2
     db_max_overflow: int = 1
+    # Chave serviço a serviço para o FaturaSUS do núcleo (prevenção). Vazia: a prevenção não roda.
+    internal_service_token: str = ""
 
     @property
     def producao(self) -> bool:
@@ -53,6 +55,7 @@ def carregar() -> Settings:
         cors_origins=tuple(o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()),
         db_pool_size=int(os.getenv("DB_POOL_SIZE", "2")),
         db_max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "1")),
+        internal_service_token=os.getenv("INTERNAL_SERVICE_TOKEN", ""),
     )
     if not _NOME_SCHEMA.match(settings.db_schema):
         raise RuntimeError(f"DB_SCHEMA inválido: {settings.db_schema!r}")

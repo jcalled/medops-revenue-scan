@@ -16,6 +16,7 @@ from app.api.deps import Acesso, require_revenue_scan
 from app.api.routes.organizacoes import _escopo
 from app.api.routes.scan import _hospital_no_escopo, _ultimos_scores
 from app.db import get_db
+from app.domain.prevencao import prevencao_por_aih, resumo_prevencao
 from app.domain.prova import SITUACOES, aih_rejeitadas, competencias_entre, confirmado_por_mes, soma
 from app.domain.resumo import _nomes
 from app.engine.categorias import POR_CODIGO
@@ -64,6 +65,10 @@ def listar_aih_rejeitadas(
     filtradas = [l for l in linhas if (not competencia or l["competencia"] == competencia)
                  and (not situacao or l["situacao"] == situacao)]
     filtradas.sort(key=lambda l: (-l["valor"], l["n_aih"]))
+    # O que o FaturaSUS diz de cada AIH, quando a prevenção já rodou para o mês.
+    prevencao = prevencao_por_aih(db, [(l["n_aih"], l["competencia"]) for l in filtradas])
+    for linha in filtradas:
+        linha["prevencao"] = prevencao.get((linha["n_aih"], linha["competencia"]))
 
     return {
         "hospital": {"cnes": numero, "nome": _nomes(db, [numero]).get(numero)},
@@ -75,6 +80,7 @@ def listar_aih_rejeitadas(
             key=lambda x: -x["valor"]),
         "oportunidade_confirmada": float(score.impacto_confirmado or 0),
         "confirmado_por_mes": confirmado_por_mes(db, [score]).get(numero, {}),
+        "prevencao": resumo_prevencao(db, [numero], meses),
         "leitura": (
             "Soma das AIH que entram na recuperação é o teto: tudo o que o hospital corrige e ainda não recebeu. "
             "A oportunidade confirmada, usada no modelo híbrido, é só a parte dessa perda acima do que hospitais "
