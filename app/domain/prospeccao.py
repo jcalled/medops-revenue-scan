@@ -87,6 +87,9 @@ def ler_planilha(conteudo: bytes) -> list[dict[str, Any]]:
         livro = openpyxl.load_workbook(BytesIO(conteudo), data_only=True)
     except Exception as exc:  # noqa: BLE001
         raise PlanilhaInvalida("Não consegui abrir a planilha: envie o .xlsx.") from exc
+    # O painel da planilha também tem uma tabela curta com "Organização": vale a
+    # aba cujo cabeçalho reconhece mais colunas e, no empate, a com mais linhas.
+    melhor: tuple[int, int, list[dict[str, Any]]] | None = None
     for aba in livro.worksheets:
         linhas = list(aba.iter_rows(values_only=True))
         for indice, linha in enumerate(linhas[:15]):
@@ -99,13 +102,17 @@ def ler_planilha(conteudo: bytes) -> list[dict[str, Any]]:
                     if titulo.startswith(prefixo) and campo not in campos.values():
                         campos[posicao] = campo
                         break
-            saida = []
+            registros = []
             for bruta in linhas[indice + 1:]:
                 registro = {campo: _valor(campo, bruta[pos] if pos < len(bruta) else None) for pos, campo in campos.items()}
                 if registro.get("nome"):
-                    saida.append(registro)
-            return saida
-    raise PlanilhaInvalida("Nenhuma aba com a coluna 'Organização'.")
+                    registros.append(registro)
+            candidata = (len(campos), len(registros), registros)
+            if melhor is None or candidata[:2] > melhor[:2]:
+                melhor = candidata
+    if melhor is None:
+        raise PlanilhaInvalida("Nenhuma aba com a coluna 'Organização'.")
+    return melhor[2]
 
 
 def importar(db: Session, registros: list[dict[str, Any]], usuario: int | None) -> dict[str, int]:

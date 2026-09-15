@@ -28,6 +28,9 @@ def _planilha(linhas) -> bytes:
     livro = openpyxl.Workbook()
     livro.active.title = "Dashboard"
     livro.active.append(["PAINEL"])
+    # Tabela curta no painel, também com "Organização": não é a lista completa.
+    livro.active.append(["Rank", "Organização", "Score"])
+    livro.active.append([1, linhas[0][2], 100])
     aba = livro.create_sheet("Top 50 OSS")
     aba.append(["TOP 50 – OSS"])
     aba.append(["Ranking comercial"])
