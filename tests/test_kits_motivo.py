@@ -79,7 +79,8 @@ def test_catalogo_sem_kit_e_cobertura(app_com_nucleo, fabrica_sessao):
 
     cat = _get(http, "/api/revenue-scan/motive-kits?uf=CE")
     assert [s["codigo"] for s in cat["sem_kit"]] == ["060082", "060109", "060120", "040008", "999999"]
-    assert cat["sem_kit"][0] == {"codigo": "060082", "descricao": None, "rejeicoes": 31, "valor": 453000.0}
+    assert cat["sem_kit"][0] == {"codigo": "060082", "descricao": None, "rejeicoes": 31, "valor": 453000.0,
+                                 "faturasus": None}
     assert cat["sem_kit_total"] == 5 and cat["valor_rejeitado"] == 462600.0
     assert cat["kits"][0]["codigo"] == "010003" and (cat["kits"][0]["rejeicoes"], cat["kits"][0]["valor"]) == (1, 4000.0)
     assert cat["cobertura_valor"] == round(4000 / 462600, 4)

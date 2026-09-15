@@ -663,6 +663,8 @@ class AihTreatment(_Privado, Base):
     justificativa: Mapped[str | None] = mapped_column(Text)
     responsavel: Mapped[str | None] = mapped_column(String(120))
     tenant_id: Mapped[int | None] = mapped_column(Integer)
+    # Depois da correção, antes de reapresentar: PASSOU | NAO_PASSOU no FaturaSUS; vazio se não conferiu.
+    faturasus: Mapped[str | None] = mapped_column(String(12))
     atualizado_por: Mapped[int | None] = mapped_column(Integer)
     atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
@@ -677,5 +679,25 @@ class AihTreatmentEvent(_Privado, Base):
     justificativa: Mapped[str | None] = mapped_column(Text)
     responsavel: Mapped[str | None] = mapped_column(String(120))
     tenant_id: Mapped[int | None] = mapped_column(Integer)
+    faturasus: Mapped[str | None] = mapped_column(String(12))
     criado_por: Mapped[int | None] = mapped_column(Integer)
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MotivePreventionStat(_Publico, Base):
+    """
+    Quanto o FaturaSUS pegou de cada motivo nas rejeições reais de uma UF: das
+    AIH avaliadas na prevenção, em quantas a regra do motivo teria disparado.
+    Refeita a cada prevenção da UF.
+    """
+
+    __tablename__ = "motive_prevention_stats"
+
+    uf: Mapped[str] = mapped_column(String(2), primary_key=True)
+    codigo: Mapped[str] = mapped_column(String(6), primary_key=True)
+    # CONFERIVEL | PRECISA_ARQUIVO_DO_HOSPITAL | BLOQUEIO_DO_GESTOR | SEM_REGRA
+    grupo: Mapped[str | None] = mapped_column(String(30))
+    avaliadas: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    pegaria: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    regras: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

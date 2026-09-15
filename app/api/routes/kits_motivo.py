@@ -1,6 +1,6 @@
 """
-Kits por motivo de rejeição e a situação do trabalho de cada AIH. A regra está
-em app/domain/kits_motivo.py.
+Kits por motivo de rejeição, a situação do trabalho de cada AIH e o FaturaSUS
+por motivo. A regra está em app/domain/kits_motivo.py.
 
 Quem vê os kits: todo cliente do Revenue Scan — é o manual de correção. Quem
 escreve kit: só a administração da plataforma. Situação da AIH: quem alcança o
@@ -50,6 +50,7 @@ class TratativaEntrada(BaseModel):
     competencia_reapresentacao: str | None = Field(default=None, max_length=6)
     justificativa: str | None = Field(default=None, max_length=2000)
     responsavel: str | None = Field(default=None, max_length=120)
+    faturasus: str | None = Field(default=None, max_length=12)
 
 
 @router.get("/motive-kits")
@@ -61,6 +62,7 @@ def catalogo(
     return {
         **km.catalogo(db, [uf.upper()] if uf else None),
         "classes": list(km.DIFICULDADE), "onde": km.ONDE, "revisoes": km.REVISOES, "situacoes": km.SITUACOES,
+        "faturasus": km.FATURASUS, "resultados": km.RESULTADOS,
     }
 
 
@@ -72,7 +74,8 @@ def kit_do_motivo(
     if kit is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Este motivo ainda não tem kit.")
     oficial = db.get(SihErrorCode, codigo)
-    return km.kit_json(kit, km.uso_por_motivo(db).get(codigo), oficial.descricao if oficial else None)
+    return km.kit_json(kit, km.uso_por_motivo(db).get(codigo), oficial.descricao if oficial else None,
+                       km.estatisticas_prevencao(db).get(codigo), km.confiabilidade_faturasus(db).get(codigo))
 
 
 @router.put("/motive-kits/{codigo}")
@@ -98,8 +101,10 @@ def _cnes_da_aih(db: Session, acesso: Acesso, n_aih: str) -> str:
 
 
 def _situacao(db: Session, n_aih: str, cnes: str) -> dict[str, Any]:
-    return {"n_aih": n_aih, "cnes": cnes, "tratativa": km.tratativa_json(db.get(AihTreatment, n_aih)),
-            "historico": km.historico(db, n_aih), "situacoes": km.SITUACOES}
+    t = db.get(AihTreatment, n_aih)
+    resultado = km.resultados(db, [t]).get(n_aih) if t else None
+    return {"n_aih": n_aih, "cnes": cnes, "tratativa": km.tratativa_json(t, resultado),
+            "historico": km.historico(db, n_aih), "situacoes": km.SITUACOES, "faturasus": km.FATURASUS}
 
 
 @router.get("/aih/{n_aih}/treatment")

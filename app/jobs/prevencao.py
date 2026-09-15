@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.adapters.faturasus import FaturaSusNucleo
 from app.adapters.ibge import validar_uf
 from app.config import get_settings
+from app.domain.kits_motivo import atualizar_estatisticas_prevencao
 from app.domain.prevencao import Motor, avaliar_competencia
 from app.models import DataLoad, SihRejection
 
@@ -55,6 +56,9 @@ def rodar(db: Session, uf: str, competencias: list[str] | None, motor: Motor) ->
         db.commit()
         logger.info("Prevenção %s %s: %s", uf, competencia, resultado)
         saida.append({"competencia": competencia, **resultado})
+    if meses:
+        # A taxa do FaturaSUS por motivo, que os kits mostram, acompanha a prevenção da UF.
+        atualizar_estatisticas_prevencao(db, uf)
     return saida
 
 
@@ -76,8 +80,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Prevenção: o FaturaSUS avalia as AIH rejeitadas de uma UF.")
     parser.add_argument("--uf", required=True)
     parser.add_argument("--competencias", help="AAAAMM separadas por vírgula; sem isto, todas as carregadas")
+    parser.add_argument("--so-estatisticas", action="store_true",
+                        help="Só refaz a taxa do FaturaSUS por motivo com a prevenção já gravada, sem chamar o núcleo")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    if args.so_estatisticas:
+        from sqlalchemy.orm import sessionmaker
+
+        from app.db import engine
+
+        with sessionmaker(bind=engine())() as db:
+            print(f"{atualizar_estatisticas_prevencao(db, validar_uf(args.uf))} motivos")
+        return 0
     competencias = [c.strip() for c in args.competencias.split(",")] if args.competencias else None
     print(job_prevencao_uf(args.uf, competencias))
     return 0

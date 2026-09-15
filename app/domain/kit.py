@@ -31,7 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domain.kits_motivo import (
-    CLASSE_POR_CATEGORIA, classe_pelos_kits, classes_confirmadas, kits_usados, tratativa_json, tratativas,
+    CLASSE_POR_CATEGORIA, classe_pelos_kits, classes_confirmadas, kits_usados, resultados, tratativa_json, tratativas,
 )
 from app.domain.prova import aih_rejeitadas
 from app.domain.recuperacao import prazo_estimado
@@ -202,9 +202,10 @@ def montar_kit(db: Session, cnes: list[str], meses: list[str], ufs: list[str], r
                               i["prazo_estimado"] or "" if i["classe"] in RECUPERAVEIS else "",
                               _ORDEM[i["classe"]], -i["valor"], i["n_aih"]))
     marcadas = tratativas(db, [i["n_aih"] for i in itens])
+    retornos = resultados(db, list(marcadas.values()))
     situacoes: dict[str, int] = defaultdict(int)
     for i in itens:
-        i["tratativa"] = tratativa_json(marcadas.get(i["n_aih"]))
+        i["tratativa"] = tratativa_json(marcadas.get(i["n_aih"]), retornos.get(i["n_aih"]))
         if i["classe"] in NA_LISTA_DE_TRABALHO:
             situacoes[i["tratativa"]["situacao"] if i["tratativa"] else "SEM_SITUACAO"] += 1
     total = sum(c["valor"] for c in classes.values())
@@ -236,7 +237,7 @@ def montar_kit(db: Session, cnes: list[str], meses: list[str], ufs: list[str], r
             for mes, por_classe in sorted(vencimento.items())
         ],
         "recupera_sozinho": sozinho,
-        "kits_motivo": kits_usados(db, {m["codigo"] for l in linhas for m in l["motivos"]}),
+        "kits_motivo": kits_usados(db, {m["codigo"] for l in linhas for m in l["motivos"]}, ufs),
         "tratativas": dict(situacoes),
         "itens": itens[:limite],
         "itens_total": len(itens),
