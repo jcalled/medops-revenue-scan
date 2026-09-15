@@ -20,6 +20,22 @@ def test_producao_exige_https_para_o_nucleo(monkeypatch):
         carregar()
 
 
+def test_engine_do_postgres_funciona_atras_de_pool_em_modo_transacao():
+    """Schema na compilação da query, não num SET da sessão; poucas conexões por processo."""
+    from dataclasses import replace
+
+    from app.config import get_settings
+    from app.db import criar_engine
+
+    base = get_settings()
+    postgres = criar_engine(replace(base, database_url="postgresql+psycopg2://u:s@db.exemplo:25061/pool?sslmode=require"))
+    assert postgres.get_execution_options()["schema_translate_map"] == {None: "revenue_scan"}
+    assert postgres.pool.size() == 2 and postgres.pool._max_overflow == 1
+
+    sqlite = criar_engine(replace(base, database_url="sqlite://"))
+    assert "schema_translate_map" not in sqlite.get_execution_options()
+
+
 def test_schema_com_nome_invalido_e_recusado(monkeypatch):
     monkeypatch.setenv("DB_SCHEMA", 'revenue"; drop schema public; --')
     with pytest.raises(RuntimeError, match="DB_SCHEMA"):

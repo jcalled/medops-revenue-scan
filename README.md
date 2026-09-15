@@ -110,11 +110,17 @@ O serviço sobe junto com o compose do núcleo (`glosa_ai/deploy`): o
 cá, no mesmo domínio da API.
 
 No `.env` deste repositório no servidor: `APP_ENV=production`, o **mesmo**
-`JWT_SECRET` do núcleo, `DATABASE_URL` do Postgres (porta direta, não a do pool
-PgBouncer: o serviço define `search_path` na conexão) e `CORS_ORIGINS` com o
+`JWT_SECRET` do núcleo, `DATABASE_URL` do Postgres e `CORS_ORIGINS` com o
 endereço **do frontend** (ex.: `https://www.glosaai.com.br`), não o da API.
-`CORE_API_URL` e `REDIS_URL` vêm do compose. `DB_POOL_SIZE` e `DB_MAX_OVERFLOW`
-(padrão 5 e 5, por processo) cabem no limite de conexões do Postgres gerenciado.
+`CORE_API_URL` e `REDIS_URL` vêm do compose.
+
+Conexões: o Postgres gerenciado tem limite e o GlosaAI divide o mesmo cluster.
+Use um **connection pool da DigitalOcean em modo Transaction** só para o Revenue
+Scan (porta 25061, o nome do pool no lugar do banco na URL). O serviço funciona
+atrás dele: o schema entra na compilação das queries (`schema_translate_map`) e
+as migrations usam `SET LOCAL` numa transação só. `DB_POOL_SIZE` e
+`DB_MAX_OVERFLOW` (padrão 2 e 1, por processo) limitam o lado do serviço. O
+container não migra ao subir; quem migra é o `deploy.sh`.
 
 O nginx do droplet roda fora do Docker: o serviço publica `127.0.0.1:8110` e o
 site da API encaminha `/api/revenue-scan/` para lá (`glosa_ai/deploy/nginx.conf`).

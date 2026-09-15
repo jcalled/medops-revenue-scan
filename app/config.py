@@ -31,8 +31,8 @@ class Settings:
     rq_queue: str
     cors_origins: tuple[str, ...]
     # Conexões por processo (API e worker): o Postgres gerenciado tem limite e o GlosaAI divide o mesmo.
-    db_pool_size: int = 5
-    db_max_overflow: int = 5
+    db_pool_size: int = 2
+    db_max_overflow: int = 1
 
     @property
     def producao(self) -> bool:
@@ -51,8 +51,8 @@ def carregar() -> Settings:
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
         rq_queue=os.getenv("RQ_QUEUE", "revenue-scan"),
         cors_origins=tuple(o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()),
-        db_pool_size=int(os.getenv("DB_POOL_SIZE", "5")),
-        db_max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "5")),
+        db_pool_size=int(os.getenv("DB_POOL_SIZE", "2")),
+        db_max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "1")),
     )
     if not _NOME_SCHEMA.match(settings.db_schema):
         raise RuntimeError(f"DB_SCHEMA inválido: {settings.db_schema!r}")
