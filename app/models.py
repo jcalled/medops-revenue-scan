@@ -614,3 +614,68 @@ class SihPrevention(_Publico, Base):
         UniqueConstraint("uf", "n_aih", "competencia", name="uq_sih_prevention"),
         Index("ix_sih_prevention_cnes_competencia", "cnes", "competencia"),
     )
+
+
+class MotiveKit(_Publico, Base):
+    """
+    Kit de recuperação de um motivo de rejeição do SIH: o que significa, onde
+    corrigir, o passo a passo e o que é preciso do hospital para corrigir por
+    completo. É conhecimento da MedOps, igual para todos os clientes.
+
+    A classe só muda a classificação das AIH quando `revisao` é CONFIRMADO
+    (com a secretaria ou o manual do SIHD); A_CONFIRMAR é proposta.
+    """
+
+    __tablename__ = "motive_kits"
+
+    codigo: Mapped[str] = mapped_column(String(6), primary_key=True)
+    titulo: Mapped[str] = mapped_column(String(160), nullable=False)
+    significado: Mapped[str] = mapped_column(Text, nullable=False)
+    # ALTA | MEDIA | INCERTA | INVESTIGAR | GESTOR | PRAZO_VENCIDO | JA_RECEBIDA
+    classe: Mapped[str] = mapped_column(String(16), nullable=False)
+    # CNES | SISAIH01 | PRONTUARIO | SESA | NENHUM
+    onde_corrigir: Mapped[str] = mapped_column(String(12), nullable=False)
+    passos: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    dados_do_hospital: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    evidencias: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    prevencao: Mapped[str | None] = mapped_column(Text)
+    fonte: Mapped[str | None] = mapped_column(Text)
+    revisao: Mapped[str] = mapped_column(String(12), nullable=False, default="A_CONFIRMAR")
+    atualizado_por: Mapped[int | None] = mapped_column(Integer)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AihTreatment(_Privado, Base):
+    """
+    Em que pé está o trabalho de recuperação de uma AIH rejeitada. Uma por AIH:
+    quem alcança o hospital pelo contrato vê e muda, e cada mudança fica em
+    AihTreatmentEvent com quem fez e quando. Voltar aprovada no RD é o SUS
+    confirmando — isso o kit mostra sem ninguém marcar.
+    """
+
+    __tablename__ = "aih_treatments"
+
+    n_aih: Mapped[str] = mapped_column(String(13), primary_key=True)
+    cnes: Mapped[str] = mapped_column(String(7), nullable=False, index=True)
+    # A_FAZER | EM_CORRECAO | CORRIGIDA | REAPRESENTADA | SEM_COMO
+    situacao: Mapped[str] = mapped_column(String(16), nullable=False)
+    competencia_reapresentacao: Mapped[str | None] = mapped_column(String(6))
+    justificativa: Mapped[str | None] = mapped_column(Text)
+    responsavel: Mapped[str | None] = mapped_column(String(120))
+    tenant_id: Mapped[int | None] = mapped_column(Integer)
+    atualizado_por: Mapped[int | None] = mapped_column(Integer)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AihTreatmentEvent(_Privado, Base):
+    __tablename__ = "aih_treatment_events"
+
+    id: Mapped[int] = mapped_column(_ID, primary_key=True)
+    n_aih: Mapped[str] = mapped_column(String(13), nullable=False, index=True)
+    situacao: Mapped[str] = mapped_column(String(16), nullable=False)
+    competencia_reapresentacao: Mapped[str | None] = mapped_column(String(6))
+    justificativa: Mapped[str | None] = mapped_column(Text)
+    responsavel: Mapped[str | None] = mapped_column(String(120))
+    tenant_id: Mapped[int | None] = mapped_column(Integer)
+    criado_por: Mapped[int | None] = mapped_column(Integer)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

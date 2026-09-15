@@ -30,6 +30,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.domain.kits_motivo import (
+    CLASSE_POR_CATEGORIA, classe_pelos_kits, classes_confirmadas, kits_usados, tratativa_json, tratativas,
+)
 from app.domain.prova import aih_rejeitadas
 from app.domain.recuperacao import prazo_estimado
 from app.domain.resumo import _lotes, _nomes
@@ -49,14 +52,6 @@ RECUPERAVEIS = ("ALTA", "MEDIA", "INCERTA")
 NA_LISTA_DE_TRABALHO = RECUPERAVEIS + ("INVESTIGAR", "GESTOR")
 _ORDEM = {c: i for i, c in enumerate(CLASSES)}
 
-CLASSE_POR_CATEGORIA = {
-    "PROFISSIONAL": "ALTA", "PACIENTE": "ALTA", "REGRAS_SIGTAP": "ALTA",
-    "LEITO_CNES": "MEDIA", "HABILITACAO_SERVICO": "MEDIA",
-    "CAPACIDADE": "INCERTA",
-    "PRAZO": "PRAZO_VENCIDO",
-    "ADMINISTRATIVO": "GESTOR",
-    "OUTROS": "INVESTIGAR",
-}
 ONDE_CORRIGIR = {
     "PROFISSIONAL": "CNES do profissional (vínculo, CBO, carga horária) ou CNS/CBO digitado na AIH",
     "PACIENTE": "SISAIH01: CNS do paciente e datas da internação",
@@ -88,10 +83,16 @@ def _meses_entre(de: str, ate: str) -> int:
     return (int(ate[:4]) * 12 + int(ate[4:])) - (int(de[:4]) * 12 + int(de[4:]))
 
 
-def classificar(linha: dict[str, Any], referencia: str) -> tuple[str, str | None]:
+def classificar(linha: dict[str, Any], referencia: str,
+                confirmados: dict[str, str] | None = None) -> tuple[str, str | None]:
     if linha["situacao"] == "JA_RECEBIDA":
         return "JA_RECEBIDA", None
-    classe = CLASSE_POR_CATEGORIA.get(linha["categoria"], "INVESTIGAR")
+    # Kit confirmado de algum motivo manda; sem ele, vale o tipo de rejeição.
+    codigos = [m["codigo"] for m in linha.get("motivos", [])]
+    classe = (classe_pelos_kits(codigos, confirmados or {})
+              or CLASSE_POR_CATEGORIA.get(linha["categoria"], "INVESTIGAR"))
+    if classe == "JA_RECEBIDA":
+        return "JA_RECEBIDA", None
     prazo = prazo_estimado(date.fromisoformat(linha["dt_saida"])) if linha.get("dt_saida") else None
     if classe in RECUPERAVEIS:
         if prazo is None:
@@ -163,6 +164,7 @@ def montar_kit(db: Session, cnes: list[str], meses: list[str], ufs: list[str], r
     linhas = aih_rejeitadas(db, cnes, meses)
     nomes = _nomes(db, cnes)
     sozinho = recupera_sozinho(db, ufs, meses)
+    confirmados = classes_confirmadas(db)
 
     classes = {c: _soma() for c in CLASSES}
     hospitais: dict[str, dict[str, Any]] = {}
@@ -170,7 +172,7 @@ def montar_kit(db: Session, cnes: list[str], meses: list[str], ufs: list[str], r
     piso = 0.0
     itens = []
     for l in linhas:
-        classe, prazo = classificar(l, referencia)
+        classe, prazo = classificar(l, referencia, confirmados)
         valor = l["valor"]
         _somar(classes[classe], valor)
         h = hospitais.setdefault(l["cnes"], {"cnes": l["cnes"], "nome": nomes.get(l["cnes"]), "total": _soma(),
@@ -192,12 +194,19 @@ def montar_kit(db: Session, cnes: list[str], meses: list[str], ufs: list[str], r
                 "onde": ONDE_CORRIGIR.get(l["categoria"], ONDE_CORRIGIR["OUTROS"]),
                 "acao": POR_CODIGO[l["categoria"]].acao if l["categoria"] in POR_CODIGO else None,
                 "por_que_a_chance": POR_QUE_A_CHANCE.get(classe),
+                "classe_pelo_kit": classe_pelos_kits([m["codigo"] for m in l["motivos"]], confirmados) is not None,
             })
 
     # Ordem de trabalho: o que vence antes, a chance maior, o valor maior; investigar e gestor no fim, por valor.
     itens.sort(key=lambda i: (i["classe"] not in RECUPERAVEIS,
                               i["prazo_estimado"] or "" if i["classe"] in RECUPERAVEIS else "",
                               _ORDEM[i["classe"]], -i["valor"], i["n_aih"]))
+    marcadas = tratativas(db, [i["n_aih"] for i in itens])
+    situacoes: dict[str, int] = defaultdict(int)
+    for i in itens:
+        i["tratativa"] = tratativa_json(marcadas.get(i["n_aih"]))
+        if i["classe"] in NA_LISTA_DE_TRABALHO:
+            situacoes[i["tratativa"]["situacao"] if i["tratativa"] else "SEM_SITUACAO"] += 1
     total = sum(c["valor"] for c in classes.values())
     recuperavel = {"aih": sum(classes[c]["aih"] for c in RECUPERAVEIS),
                    "valor": sum(classes[c]["valor"] for c in RECUPERAVEIS)}
@@ -227,6 +236,8 @@ def montar_kit(db: Session, cnes: list[str], meses: list[str], ufs: list[str], r
             for mes, por_classe in sorted(vencimento.items())
         ],
         "recupera_sozinho": sozinho,
+        "kits_motivo": kits_usados(db, {m["codigo"] for l in linhas for m in l["motivos"]}),
+        "tratativas": dict(situacoes),
         "itens": itens[:limite],
         "itens_total": len(itens),
         "lista": lista,
