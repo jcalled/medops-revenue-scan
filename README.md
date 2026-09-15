@@ -73,6 +73,26 @@ ou motivo sem regra) ou **já voltou aprovada**, com motivo oficial, o porquê e
 arquivo RJ/ER de origem com SHA-256. A oportunidade confirmada nunca passa da
 soma das AIH marcadas, nem no total nem no mês.
 
+## Prevenção: o que o FaturaSUS pegaria antes do envio
+
+Das AIH que o SUS rejeitou, quais o FaturaSUS teria apontado antes do envio —
+pela regra que cuida do motivo da rejeição, não por qualquer achado. O motor
+fica no núcleo (`glosa_ai`, `app/fatursus/sih_publico.py`); este serviço manda as
+rejeitadas pela rota interna `POST /internal/fatursus/sih/avaliar`, com a chave
+`INTERNAL_SERVICE_TOKEN` (32+ caracteres, **a mesma** no `.env` dos dois), e
+guarda o resultado em `sih_prevention`.
+
+- A carga guarda os campos do RJ que o motor lê e as diárias do lote antes de cada
+  AIH (ordem da remessa), porque capacidade instalada só se afirma com o lote.
+  Mês carregado antes disso aparece como "não avaliado": recarregue.
+- Roda sozinha depois de cada carga; pela tela, **Dados do DATASUS → Rodar
+  prevenção**; pelo terminal, `python -m app.jobs.prevencao --uf CE`.
+- Grupos por AIH: pegaria, conferível que não pegou, precisa do arquivo do
+  hospital (profissional, CNS do paciente), sem regra, bloqueio do gestor. A taxa
+  é sobre o conferível.
+- Ceará, mai–jul/26: 1.356 de 4.310 AIH conferíveis (31%, R$ 6,1 mi); ISGH: 890
+  de 2.069 (43%, R$ 4,47 mi).
+
 ## Recuperação e fatura
 
 `/api/revenue-scan/recovery` (tela `/revenue-scan/recuperacao`). O acompanhamento
