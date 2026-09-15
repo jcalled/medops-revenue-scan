@@ -79,7 +79,7 @@ def test_marca_base_e_nova_e_confere_recuperadas(app_com_nucleo, fabrica_sessao)
         == ("BASE", "RECUPERADA", "202607", 1100.0)
     assert (itens["2"]["origem"], itens["2"]["situacao"]) == ("BASE", "EM_ABERTO")
     assert (itens["5"]["origem"], itens["5"]["situacao"], itens["5"]["valor_aprovado"]) == ("NOVA", "RECUPERADA", 480.0)
-    assert (itens["6"]["origem"], itens["6"]["prazo_estimado"], itens["6"]["prazo"]) == ("NOVA", "202607", "VENCIDO")
+    assert (itens["6"]["origem"], itens["6"]["prazo_estimado"], itens["6"]["prazo"]) == ("NOVA", "202609", None)
     assert itens["2"]["motivos"] == [{"codigo": "060082", "descricao": "QUANTIDADE DE DIÁRIAS SUPERIOR A CAPACIDADE INSTALADA"}]
     assert [i["situacao"] for i in detalhe["itens"]][:2] == ["EM_ABERTO", "EM_ABERTO"]
 
@@ -89,7 +89,7 @@ def test_marca_base_e_nova_e_confere_recuperadas(app_com_nucleo, fabrica_sessao)
     assert r["recuperadas"] == {"aih": 2, "valor": 1580.0, "valor_rejeitado": 1500.0}
     assert r["em_aberto"] == {"aih": 2, "valor": 2300.0} and r["taxa_recuperada"] == 0.5
     assert r["por_mes"] == [{"competencia": "202607", "aih": 2, "valor": 1580.0}]
-    assert r["prazo_vencido"] == {"aih": 1, "valor": 300.0}
+    assert r["prazo_vencido"] == {"aih": 0, "valor": 0.0}
 
 
 def test_fatura_do_mes(app_com_nucleo, fabrica_sessao):

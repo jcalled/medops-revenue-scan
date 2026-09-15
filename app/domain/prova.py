@@ -12,7 +12,7 @@ Situação de cada AIH (a última rejeição dela no período):
   SIGTAP, profissional, dados do paciente) e não voltou aprovada em nenhum
   processamento carregado;
 - FORA_DO_ALCANCE: bloqueio do gestor ou motivo sem correção definida;
-- JA_RECEBIDA: voltou aprovada depois — o dinheiro já entrou.
+- JA_RECEBIDA: voltou aprovada depois — há aprovação registrada, sem prova de recebimento.
 """
 from __future__ import annotations
 
@@ -27,9 +27,9 @@ from app.engine.categorias import FORA_DA_RECUPERACAO, POR_CODIGO, categorizar
 from app.models import DataLoad, HospitalScore, SihApprovedAih, SihErrorCode, SihRejection, SihRejectionReason
 
 SITUACOES = {
-    "RECUPERAR": "Entra na recuperação",
+    "RECUPERAR": "Potencial de correção, a validar",
     "FORA_DO_ALCANCE": "Não entra",
-    "JA_RECEBIDA": "Já voltou aprovada",
+    "JA_RECEBIDA": "Aprovação localizada no RD",
 }
 
 
@@ -51,7 +51,7 @@ def _porque(situacao: str, categoria: str, motivos: list[dict[str, Any]]) -> str
     else:
         texto_motivo = f"{principal['codigo']} (sem descrição na tabela oficial)"
     if situacao == "JA_RECEBIDA":
-        return f"Rejeitada por {texto_motivo}, mas voltou aprovada num processamento posterior: o valor já entrou."
+        return f"Rejeitada por {texto_motivo}, há aprovação no RD carregado. Aprovação não comprova recebimento; confira a cronologia."
     if categoria == "ADMINISTRATIVO":
         return (f"Bloqueio do gestor: {texto_motivo}. Depende de negociação com a secretaria (faixa de numeração, "
                 "teto, auditoria) e não de correção da conta — fica fora da cobrança.")
@@ -75,9 +75,13 @@ def aih_rejeitadas(db: Session, cnes: list[str], meses: list[str]) -> list[dict[
         return []
 
     aprovadas: set[str] = set()
+    meses_aprovacao: dict[str, list[str]] = defaultdict(list)
     motivos: dict[tuple[str, str], set[str]] = defaultdict(set)
     for lote in _lotes(list(ultimas)):
-        aprovadas.update(db.execute(select(SihApprovedAih.n_aih).where(SihApprovedAih.n_aih.in_(lote))).scalars())
+        for n, mes in db.execute(select(SihApprovedAih.n_aih, SihApprovedAih.competencia)
+                                 .where(SihApprovedAih.n_aih.in_(lote))):
+            aprovadas.add(n)
+            meses_aprovacao[n].append(mes)
         for n_aih, competencia, codigo in db.execute(
             select(SihRejectionReason.n_aih, SihRejectionReason.competencia, SihRejectionReason.codigo_erro)
             .where(SihRejectionReason.n_aih.in_(lote), SihRejectionReason.competencia.in_(meses))
@@ -114,6 +118,9 @@ def aih_rejeitadas(db: Session, cnes: list[str], meses: list[str]) -> list[dict[
             "categoria_nome": categoria.nome,
             "situacao": situacao,
             "situacao_nome": SITUACOES[situacao],
+            "competencias_aprovacao": sorted(set(meses_aprovacao[r.n_aih])),
+            "aprovacao_posterior": any(m > r.competencia for m in meses_aprovacao[r.n_aih]),
+            "recebimento_comprovado": False,
             "porque": _porque(situacao, categoria.codigo, lista_motivos),
             "fonte": {"rejeicao": fontes.get(("SIH_RJ", r.uf, r.competencia)),
                       "motivo": fontes.get(("SIH_ER", r.uf, r.competencia))},

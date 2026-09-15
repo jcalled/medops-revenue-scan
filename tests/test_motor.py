@@ -40,7 +40,7 @@ def motor(*perfis):
 
 
 def test_categoria_mais_acionavel():
-    assert categorizar({"010003", "060082"}).codigo == "CAPACIDADE"
+    assert categorizar({"010003", "060082"}).codigo == "ADMINISTRATIVO"
     assert categorizar({"060120", "060082"}).codigo == "HABILITACAO_SERVICO"
     assert categorizar({"999999"}).codigo == "OUTROS"
     assert categorizar(set()).codigo == "OUTROS"

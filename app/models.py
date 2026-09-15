@@ -172,7 +172,7 @@ class SihApprovedAih(_Publico, Base):
     competencia: Mapped[str] = mapped_column(String(6), nullable=False)
     cnes: Mapped[str] = mapped_column(String(7), nullable=False)
     n_aih: Mapped[str] = mapped_column(String(13), nullable=False)
-    # VAL_TOT do RD: o dinheiro que entrou. É a base da cobrança da recuperação.
+    # VAL_TOT do RD: produção bruta aprovada; não é comprovante de recebimento.
     valor: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
 
     __table_args__ = (

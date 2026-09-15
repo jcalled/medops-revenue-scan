@@ -105,6 +105,9 @@ def _json(p: SihPrevention) -> dict[str, Any]:
         "falhas": p.falhas or [],
         "avisos": p.avisos or [],
         "mensagens": p.mensagens or [],
+        "referencias": p.referencias or {},
+        "avaliado_em": p.avaliado_em.isoformat() if p.avaliado_em else None,
+        "metodo": "RETROSPECTIVO",
     }
 
 
@@ -144,6 +147,7 @@ def resumo_prevencao(db: Session, cnes: list[str], meses: list[str]) -> dict[str
 
     grupos = {g: {"aih": 0, "valor": 0.0} for g in GRUPOS}
     nao_avaliadas = {"aih": 0, "valor": 0.0}
+    todos_motivos = {"aih": 0, "valor": 0.0}
     regras: Counter[str] = Counter()
     for n_aih, (competencia, valor) in ultimas.items():
         r = resultados.get((n_aih, competencia))
@@ -152,6 +156,9 @@ def resumo_prevencao(db: Session, cnes: list[str], meses: list[str]) -> dict[str
         alvo["valor"] += valor
         if r and r["pegaria"]:
             regras.update(r["regras"])
+            if r["motivos"] and all(m.get("pegaria") for m in r["motivos"]):
+                todos_motivos["aih"] += 1
+                todos_motivos["valor"] += valor
 
     def arredondar(d: dict[str, float]) -> dict[str, float]:
         return {"aih": d["aih"], "valor": round(d["valor"], 2)}
@@ -159,8 +166,12 @@ def resumo_prevencao(db: Session, cnes: list[str], meses: list[str]) -> dict[str
     pegou, nao_pegou = grupos["PEGARIA"], grupos["CONFERIVEL_NAO_PEGOU"]
     conferivel = {"aih": pegou["aih"] + nao_pegou["aih"], "valor": pegou["valor"] + nao_pegou["valor"]}
     return {
+        "metodo": "RETROSPECTIVO",
+        "validacao_prospectiva": False,
+        "leitura": "Reexecução de regras sobre AIH já rejeitadas. Detectar ao menos um motivo não garante evitar todos os impedimentos nem receber o valor da AIH. Não mede falsos positivos em contas aprovadas.",
         "grupos": {g: {"nome": GRUPOS[g], **arredondar(v)} for g, v in grupos.items()},
         "pegaria": arredondar(pegou),
+        "todos_motivos_detectados": arredondar(todos_motivos),
         "conferivel": arredondar(conferivel),
         "taxa_conferivel": round(pegou["aih"] / conferivel["aih"], 4) if conferivel["aih"] else None,
         "taxa_conferivel_valor": round(pegou["valor"] / conferivel["valor"], 4) if conferivel["valor"] else None,

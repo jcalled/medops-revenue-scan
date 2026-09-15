@@ -28,6 +28,20 @@ router = APIRouter(prefix="/api/revenue-scan", tags=["prova"])
 _CNES = re.compile(r"^\d{1,7}$")
 
 
+@router.get("/hospitals/{cnes}/evidencias")
+def evidencias_publicas(
+    cnes: str,
+    referencia: str | None = Query(default=None, pattern=r"^\d{4}(0[1-9]|1[0-2])$"),
+    acesso: Acesso = Depends(require_revenue_scan),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from app.domain.evidencias import dossie
+    from app.domain.kit import referencia_padrao
+
+    prova = listar_aih_rejeitadas(cnes=cnes, competencia=None, situacao=None, acesso=acesso, db=db)
+    return dossie(db, prova, referencia or referencia_padrao())
+
+
 @router.get("/hospitals/{cnes}/aih-rejeitadas")
 def listar_aih_rejeitadas(
     cnes: str,
@@ -82,7 +96,7 @@ def listar_aih_rejeitadas(
         "confirmado_por_mes": confirmado_por_mes(db, [score]).get(numero, {}),
         "prevencao": resumo_prevencao(db, [numero], meses),
         "leitura": (
-            "Soma das AIH que entram na recuperação é o teto: tudo o que o hospital corrige e ainda não recebeu. "
+            "Soma das AIH que entram na recuperação é o teto: valor bruto de rejeições potencialmente corrigíveis sem aprovação localizada, ainda sujeito a prazo e validação. "
             "A oportunidade confirmada, usada no modelo híbrido, é só a parte dessa perda acima do que hospitais "
             "semelhantes perdem — a conta conservadora."
         ),

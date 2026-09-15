@@ -77,3 +77,8 @@ def app_com_nucleo(fabrica_sessao):
         return TestClient(app), chamadas
 
     return _montar
+
+
+@pytest.fixture(autouse=True)
+def acervo_isolado(tmp_path, monkeypatch):
+    monkeypatch.setenv("EVIDENCE_ARCHIVE_DIR", str(tmp_path / "evidence"))

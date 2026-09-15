@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/revenue-scan", tags=["kit"])
 @router.get("/kit")
 def kit_de_recuperacao(
     f: Filtros = Depends(filtros),
-    referencia: str | None = Query(default=None, pattern=r"^\d{6}$",
+    referencia: str | None = Query(default=None, pattern=r"^\d{4}(0[1-9]|1[0-2])$",
                                    description="Mês em que o hospital ainda apresenta (AAAAMM); padrão, o corrente"),
     lista: str = Query(default="trabalho", pattern=r"^(trabalho|todas)$",
                        description="trabalho: recuperáveis, investigar e gestor; todas: inclui já recebidas e vencidas"),
@@ -46,7 +46,7 @@ def kit_de_recuperacao(
         "classes_nomes": CLASSES,
         **corpo,
         "ressalva": (
-            "Prazo estimado pela data de alta mais quatro meses. Os dados públicos chegam com atraso: parte das AIH "
+            "Reapresentação: janela estimada de seis meses após a alta (art. 401, § 2º, PRC SAES/MS 1/2022), para AIH já apresentada e rejeitada ou bloqueada. Confirmar calendário do gestor. Os dados públicos chegam com atraso: parte das AIH "
             "pode já ter sido reapresentada em processamentos ainda não carregados. Chance média e incerta dependem "
             "de fatos que só o hospital confirma — se a habilitação existe, quantos leitos funcionam."
         ),

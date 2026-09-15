@@ -3,7 +3,7 @@ Kit de recuperação de qualquer recorte.
 
 O que estes testes travam:
 - cada AIH cai numa classe só: já recebida, prazo vencido, gestor, investigar ou recuperável (alta, média, incerta);
-- prazo conta a partir do mês de referência; 040008 é vencida mesmo com data recente;
+- prazo conta a partir do mês de referência; 040008 fora da janela é vencida; dentro dela exige investigação;
 - recuperável sem data de alta vai para investigar, não para a lista como se tivesse prazo;
 - por hospital, por mês de vencimento e a lista de trabalho na ordem prazo → chance → valor;
 - "recupera sozinho" só vira taxa com amostra, e dá o piso sem ação;
@@ -30,15 +30,15 @@ def _rejeitar(db, cnes, competencia, n_aih, valor, codigo, saida):
 def _dados(fabrica_sessao):
     with fabrica_sessao() as db:
         popular(db)  # 30 AIH do HRVJ por capacidade em mai/26 (R$ 15 mil cada); a ...000 voltou em jun/26
-        db.execute(update(SihRejection).values(dt_saida=date(2026, 6, 10)))  # prazo out/26
-        _rejeitar(db, HRVJ, "202606", "P1", 1000.0, "060109", date(2026, 6, 1))    # profissional: alta, vence out
-        _rejeitar(db, HRVJ, "202606", "H1", 2000.0, "060120", date(2026, 5, 20))   # habilitação: média, vence set
-        _rejeitar(db, HRVJ, "202606", "V1", 3000.0, "060082", date(2026, 1, 10))   # capacidade vencida em mai
+        db.execute(update(SihRejection).values(dt_saida=date(2026, 6, 10)))  # prazo dez/26
+        _rejeitar(db, HRVJ, "202606", "P1", 1000.0, "060109", date(2026, 6, 1))    # profissional: alta, vence dez
+        _rejeitar(db, HRVJ, "202606", "H1", 2000.0, "060120", date(2026, 5, 20))   # habilitação: média, vence jan/27
+        _rejeitar(db, HRVJ, "202606", "V1", 3000.0, "060082", date(2026, 1, 10))   # capacidade vencida em jul
         _rejeitar(db, HRVJ, "202606", "G1", 4000.0, "010003", date(2026, 6, 1))    # gestor
         _rejeitar(db, HRVJ, "202606", "O1", 500.0, "999999", date(2026, 6, 1))     # sem regra
-        _rejeitar(db, HRVJ, "202606", "Z1", 600.0, "040008", date(2026, 6, 1))     # rejeitada por prazo
+        _rejeitar(db, HRVJ, "202606", "Z1", 600.0, "040008", date(2026, 1, 1))     # rejeitada por prazo
         _rejeitar(db, HRVJ, "202606", "S1", 800.0, "060109", None)                 # recuperável sem data
-        _rejeitar(db, HRC, "202607", "B1", 700.0, "060109", date(2026, 7, 1))      # outro hospital, vence nov
+        _rejeitar(db, HRC, "202607", "B1", 700.0, "060109", date(2026, 7, 1))      # outro hospital, vence jan/27
         db.commit()
         recalcular(db, ufs=["CE"])
 
@@ -52,7 +52,7 @@ def _get(http, caminho, cabecalho=None):
 def test_classes_por_hospital_vencimento_e_lista(app_com_nucleo, fabrica_sessao):
     _dados(fabrica_sessao)
     http, _ = app_com_nucleo(lambda r: httpx.Response(200, json=contrato()))
-    kit = _get(http, "/api/revenue-scan/kit?uf=CE&referencia=202609")
+    kit = _get(http, "/api/revenue-scan/kit?uf=CE&referencia=202611")
 
     classes = {c: (v["aih"], v["valor"]) for c, v in kit["classes"].items()}
     assert classes == {
@@ -65,9 +65,9 @@ def test_classes_por_hospital_vencimento_e_lista(app_com_nucleo, fabrica_sessao)
 
     assert [h["cnes"] for h in kit["hospitais"]] == [HRVJ, HRC]
     assert kit["hospitais"][0]["recuperavel"] == {"aih": 31, "valor": 438000.0, "pct_valor": round(438000 / 461900, 4)}
-    assert [(v["competencia"], v["total"]["aih"]) for v in kit["vencimento"]] == [("202609", 1), ("202610", 30), ("202611", 1)]
+    assert [(v["competencia"], v["total"]["aih"]) for v in kit["vencimento"]] == [("202611", 1), ("202612", 30), ("202701", 1)]
 
-    # Vence em set (média), vence em out (alta antes da incerta), vence em nov; depois investigar e gestor por valor.
+    # Vence em nov (média), vence em dez (alta antes da incerta), vence em jan; depois investigar e gestor por valor.
     ordem = [i["n_aih"] for i in kit["itens"]]
     assert ordem[:3] == ["H1", "P1", "2326000000001"]
     assert ordem[31:] == ["B1", "S1", "O1", "G1"]
@@ -83,15 +83,15 @@ def test_classes_por_hospital_vencimento_e_lista(app_com_nucleo, fabrica_sessao)
                                                         "rejeitadas": 2, "voltaram": 0, "taxa": None}
     assert kit["piso_sem_acao"] == pytest.approx(29 * 15000 * 0.0323, abs=0.01)
 
-    todas = _get(http, "/api/revenue-scan/kit?uf=CE&referencia=202609&lista=todas")
+    todas = _get(http, "/api/revenue-scan/kit?uf=CE&referencia=202611&lista=todas")
     assert todas["itens_total"] == 38
 
 
 def test_referencia_muda_o_que_venceu(app_com_nucleo, fabrica_sessao):
     _dados(fabrica_sessao)
     http, _ = app_com_nucleo(lambda r: httpx.Response(200, json=contrato()))
-    kit = _get(http, "/api/revenue-scan/kit?uf=CE&referencia=202611")
-    # Em novembro, só a do HRC ainda cabe; as de setembro e outubro venceram.
+    kit = _get(http, "/api/revenue-scan/kit?uf=CE&referencia=202701")
+    # Em janeiro, só a do HRC ainda cabe; as de novembro e dezembro venceram.
     assert kit["recuperavel_no_prazo"] == {"aih": 1, "valor": 700.0, "pct_valor": round(700 / 462600, 4)}
     assert kit["classes"]["PRAZO_VENCIDO"]["aih"] == 33
 
@@ -99,15 +99,15 @@ def test_referencia_muda_o_que_venceu(app_com_nucleo, fabrica_sessao):
 def test_escopo_do_contrato(app_com_nucleo, fabrica_sessao):
     _dados(fabrica_sessao)
     http, _ = app_com_nucleo(lambda r: httpx.Response(200, json=contrato({"cnes": [HRC]})))
-    kit = _get(http, "/api/revenue-scan/kit?referencia=202609")
+    kit = _get(http, "/api/revenue-scan/kit?referencia=202611")
     assert [h["cnes"] for h in kit["hospitais"]] == [HRC] and kit["rejeitadas"]["aih"] == 1
 
 
 def test_classificar_e_referencia_padrao():
     base = {"situacao": "RECUPERAR", "categoria": "PROFISSIONAL", "dt_saida": "2026-06-01"}
-    assert classificar(base, "202610") == ("ALTA", "202610")
-    assert classificar(base, "202611") == ("PRAZO_VENCIDO", "202610")
+    assert classificar(base, "202612") == ("ALTA", "202612")
+    assert classificar(base, "202701") == ("PRAZO_VENCIDO", "202612")
     assert classificar({**base, "situacao": "JA_RECEBIDA"}, "202601") == ("JA_RECEBIDA", None)
-    assert classificar({**base, "dt_saida": None}, "202609") == ("INVESTIGAR", None)
-    assert classificar({**base, "categoria": "ADMINISTRATIVO"}, "202609") == ("GESTOR", "202610")
+    assert classificar({**base, "dt_saida": None}, "202611") == ("INVESTIGAR", None)
+    assert classificar({**base, "categoria": "ADMINISTRATIVO"}, "202611") == ("GESTOR", "202612")
     assert referencia_padrao(date(2026, 9, 15)) == "202609"

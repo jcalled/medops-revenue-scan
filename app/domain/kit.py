@@ -4,9 +4,8 @@ das AIH rejeitadas, e a lista de trabalho do faturamento.
 
 Cada AIH rejeitada (a última rejeição dela no período) cai numa classe:
 
-- JA_RECEBIDA: voltou aprovada em algum processamento — o dinheiro já entrou;
-- PRAZO_VENCIDO: passou dos quatro meses depois da alta, ou foi rejeitada por
-  isso (040008) — pela via normal não volta;
+- JA_RECEBIDA: voltou aprovada em algum processamento — aprovação registrada, sem comprovação de recebimento;
+- PRAZO_VENCIDO: fora da janela estimada de seis meses após a alta para reapresentação;
 - GESTOR: teto, faixa, bloqueio da secretaria — negociação, não correção;
 - INVESTIGAR: motivo sem regra (060221, por exemplo) ou AIH sem data de alta;
 - ALTA, MEDIA, INCERTA: recuperável dentro do prazo, pela chance de a correção
@@ -45,8 +44,8 @@ CLASSES = {
     "INCERTA": "Recuperável · chance incerta",
     "INVESTIGAR": "A investigar",
     "GESTOR": "Bloqueio do gestor",
-    "PRAZO_VENCIDO": "Não dá mais: prazo vencido",
-    "JA_RECEBIDA": "Já recebida",
+    "PRAZO_VENCIDO": "Fora da janela estimada de reapresentação",
+    "JA_RECEBIDA": "Aprovação localizada no RD",
 }
 RECUPERAVEIS = ("ALTA", "MEDIA", "INCERTA")
 NA_LISTA_DE_TRABALHO = RECUPERAVEIS + ("INVESTIGAR", "GESTOR")
@@ -59,7 +58,7 @@ ONDE_CORRIGIR = {
     "LEITO_CNES": "CNES: leitos de UTI/UCI e habilitação — só se o leito existe",
     "HABILITACAO_SERVICO": "CNES: habilitação ou serviço/classificação — só se o hospital tem de fato",
     "CAPACIDADE": "CNES (leitos SUS em funcionamento) e SESA (regra de capacidade); reapresentar em mês com folga",
-    "PRAZO": "Fora do prazo: pela via normal não volta",
+    "PRAZO": "Confirmar apresentação anterior, data de alta e janela de reapresentação com o gestor",
     "ADMINISTRATIVO": "SESA: teto, faixa de numeração ou bloqueio",
     "OUTROS": "SESA: confirmar o que o motivo significa",
 }
@@ -92,9 +91,12 @@ def classificar(linha: dict[str, Any], referencia: str,
     classe = (classe_pelos_kits(codigos, confirmados or {})
               or CLASSE_POR_CATEGORIA.get(linha["categoria"], "INVESTIGAR"))
     if classe == "JA_RECEBIDA":
-        return "JA_RECEBIDA", None
+        # Um manual de motivo não substitui a aprovação efetivamente localizada no RD.
+        classe = "INVESTIGAR"
+    if linha["categoria"] == "PRAZO":
+        classe = "INVESTIGAR"  # Rever também kits antigos que usavam quatro meses.
     prazo = prazo_estimado(date.fromisoformat(linha["dt_saida"])) if linha.get("dt_saida") else None
-    if classe in RECUPERAVEIS:
+    if classe in RECUPERAVEIS or linha["categoria"] == "PRAZO":
         if prazo is None:
             return "INVESTIGAR", None
         if prazo < referencia:

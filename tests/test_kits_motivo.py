@@ -53,7 +53,7 @@ def test_kit_confirmado_muda_a_classificacao(app_com_nucleo, fabrica_sessao):
 
     antes = {i["n_aih"]: i for i in _get(http, url)["itens"]}
     assert antes["G1"]["classe"] == "GESTOR" and not antes["G1"]["classe_pelo_kit"]
-    assert antes["M1"]["classe"] == "ALTA"
+    assert antes["M1"]["classe"] == "INVESTIGAR"
 
     with fabrica_sessao() as db:
         db.get(MotiveKit, "010003").revisao = "CONFIRMADO"
@@ -62,7 +62,7 @@ def test_kit_confirmado_muda_a_classificacao(app_com_nucleo, fabrica_sessao):
     kit = _get(http, url)
     depois = {i["n_aih"]: i for i in kit["itens"]}
     assert depois["G1"]["classe"] == "MEDIA" and depois["G1"]["classe_pelo_kit"]
-    assert depois["G1"]["meses_para_vencer"] == 1
+    assert depois["G1"]["meses_para_vencer"] == 3
     # 060109 confirmado junto de um motivo sem kit (vai para investigar): vale o mais difícil.
     assert depois["M1"]["classe"] == "INVESTIGAR"
     assert depois["P1"]["classe"] == "ALTA"

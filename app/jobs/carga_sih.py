@@ -28,6 +28,7 @@ from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
 from app.adapters import datasus
+from app.adapters.evidence_archive import preservar
 from app.adapters.base import DataSourceAdapter, OrigemArquivo
 from app.adapters.cnes_api import CnesDadosAbertos
 from app.adapters.ibge import CODIGO_UF, validar_uf
@@ -125,6 +126,7 @@ def carregar_competencia(db: Session, uf: str, competencia: str, adapters: dict[
             caminhos[tipo] = caminho
             cargas[tipo].arquivo = caminho.name
             cargas[tipo].checksum = datasus.sha256(caminho)
+            preservar(caminho, cargas[tipo].checksum)
 
         # A última linha de cada AIH no arquivo vence.
         aprovadas = {linha["n_aih"]: linha for linha in adapters["RD"].ler(caminhos["RD"])}

@@ -65,7 +65,7 @@ def test_cada_aih_com_situacao_motivo_e_porque(app_com_nucleo, fabrica_sessao):
     assert recuperar["fonte"] == {"rejeicao": {"arquivo": "RJCE2605.dbc", "sha256": "abc123"},
                                   "motivo": {"arquivo": "ERCE2605.dbc", "sha256": "def456"}}
 
-    assert linhas["2326000000000"]["situacao"] == "JA_RECEBIDA" and "já entrou" in linhas["2326000000000"]["porque"]
+    assert linhas["2326000000000"]["situacao"] == "JA_RECEBIDA" and "não comprova recebimento" in linhas["2326000000000"]["porque"]
     gestor = linhas["2326999999901"]
     assert gestor["situacao"] == "FORA_DO_ALCANCE" and "Bloqueio do gestor" in gestor["porque"]
     assert gestor["procedimento"] == "0303010010" and gestor["competencia_aih"] == "202604"

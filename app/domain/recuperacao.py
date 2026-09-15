@@ -4,7 +4,7 @@ Acompanhamento da recuperação: o que o modelo híbrido cobra.
 Na abertura entram as AIH que o hospital pode corrigir e ainda não recebeu. A
 cada mês carregado do SIH, a AIH marcada que aparece aprovada num processamento
 posterior à rejeição vira RECUPERADA, com o mês e o valor aprovado no RD — o
-dinheiro que entrou. A fatura do mês é o fixo por hospital mais o percentual
+valor bruto de produção, sem prova de recebimento. A simulação de fatura do mês é o fixo por hospital mais o percentual
 sobre esse valor, com as AIH como anexo.
 
 - BASE: rejeitada antes do início e não aprovada antes dele.
@@ -29,11 +29,14 @@ from app.models import (
 
 ABERTA, RECUPERADA = "EM_ABERTO", "RECUPERADA"
 ATIVO, ENCERRADO = "ATIVO", "ENCERRADO"
-# Motivo 040008: a AIH não pode ser apresentada mais de quatro meses depois da alta.
-PRAZO_MESES = 4
+# Reapresentação de AIH já apresentada/rejeitada: art. 401, § 2º.
+# Apresentação inicial tem regra distinta (quatro meses); não usar esta função para ela.
+PRAZO_MESES = 6
+FONTE_PRAZO = "https://bvsms.saude.gov.br/bvs/saudelegis/saes/2022/prc0001_31_03_2022.html"
 
 RESSALVA_FATURA = (
-    "Valor recuperado é o valor aprovado no RD do mês para as AIH marcadas neste acompanhamento, conferido nos "
+    "Simulação comercial sobre produção aprovada: não comprova recebimento nem atribuição à MedOps. "
+    "O valor é o aprovado no RD do mês para as AIH marcadas neste acompanhamento, conferido nos "
     "arquivos públicos do DATASUS. O percentual incide só sobre o que passa da linha de base — o que o hospital "
     "já recuperava sozinho por mês antes do contrato. Confira o número de cada AIH no SIH do hospital antes de "
     "emitir a nota. "
@@ -48,7 +51,7 @@ def mais_meses(aaaamm: str, n: int) -> str:
 
 
 def prazo_estimado(dt_saida: date | None) -> str | None:
-    """Último mês de processamento em que a AIH ainda cabe: quatro meses depois da alta. É estimativa."""
+    """Último mês de processamento em que a AIH ainda cabe: seis meses depois da alta para reapresentação. Confirmar calendário do gestor."""
     return mais_meses(f"{dt_saida.year}{dt_saida.month:02d}", PRAZO_MESES) if dt_saida else None
 
 
@@ -98,7 +101,7 @@ def calcular_linha_de_base(db: Session, cnes: list[str], inicio: str) -> tuple[d
         primeira = corrigiveis[0]
         volta = next(((c, v) for c, v in aprovacoes.get(n_aih, []) if c > primeira.competencia), None)
         if volta and volta[0] in janela:
-            valor = volta[1] if volta[1] is not None else float(primeira.valor or 0)
+            valor = volta[1] if volta[1] is not None else 0.0
             base[primeira.cnes] = base.get(primeira.cnes, 0.0) + valor
     return {c: round(v / len(elegiveis), 2) for c, v in base.items()}, elegiveis
 
@@ -195,8 +198,8 @@ def _valor_rejeitado(i: RecoveryItem) -> float:
 
 
 def valor_cobrado(i: RecoveryItem) -> float:
-    # Carga antiga sem valor no RD: usa o valor da rejeição e avisa na linha.
-    return float(i.valor_aprovado) if i.valor_aprovado is not None else _valor_rejeitado(i)
+    # Sem valor no RD, não inventar uma base financeira com o valor rejeitado.
+    return float(i.valor_aprovado) if i.valor_aprovado is not None else 0.0
 
 
 def _soma(itens: list[RecoveryItem], valor=_valor_rejeitado) -> dict[str, float]:
@@ -316,5 +319,9 @@ def fatura(db: Session, t: RecoveryTracking, competencia: str) -> dict[str, Any]
         },
         "linhas": [{**item_json(i, nomes, descricoes, None), "valor_cobrado": valor_cobrado(i),
                     "arquivo_rd": arquivos.get(i.uf)} for i in recuperadas],
+        "natureza": "SIMULACAO_SOBRE_APROVACAO",
+        "recebimento_comprovado": False,
+        "atribuicao_medops_comprovada": False,
+        "aih_sem_valor_aprovado": sum(i.valor_aprovado is None for i in recuperadas),
         "ressalva": RESSALVA_FATURA,
     }

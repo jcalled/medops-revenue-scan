@@ -32,7 +32,7 @@ FAIXAS = "Faixas de numeração de AIH autorizadas pela secretaria para o hospit
 CONTRATO = "Contrato com o gestor: metas, teto financeiro mensal e aditivos"
 CNS = "CNS do paciente conferido no cartão ou no CadSUS"
 
-REAPRESENTAR = "Reapresentar no SISAIH01 dentro de quatro meses da alta."
+REAPRESENTAR = "Confirmar com o gestor a reapresentação em até seis meses da alta, para AIH já apresentada e rejeitada ou bloqueada (art. 401, § 2º, PRC SAES/MS 1/2022)."
 NUNCA_INVENTAR = "Corrigir só o que o prontuário sustenta: nunca mudar o que foi feito no paciente para a conta passar."
 
 
@@ -116,7 +116,7 @@ KITS: list[dict[str, Any]] = [
             "Se há leito SUS funcionando fora do CNES, atualizar o CNES antes de reapresentar.",
             "Conferir no censo diário se as diárias informadas batem com a ocupação; corrigir diárias lançadas a mais.",
             "Pedir à secretaria o relatório de capacidade do SIHD: quanto sobrou em cada mês.",
-            "Reapresentar as AIH em competência com folga de capacidade, dentro de quatro meses da alta.",
+            "Reapresentar as AIH em competência com folga de capacidade, dentro da janela de seis meses para reapresentação, confirmada com o gestor.",
         ],
         [LEITOS, CENSO, SISAIH, CRITICAS],
         ["Espelho do CNES antes e depois", "Censo diário do mês", "Mês em que cada AIH foi reapresentada"],
@@ -130,7 +130,7 @@ KITS: list[dict[str, Any]] = [
             "Conferir leitos de UTI SUS cadastrados, habilitados e em funcionamento na competência.",
             "Conferir no censo de UTI se as diárias informadas batem com a ocupação.",
             "Atualizar o CNES se há leito de UTI habilitado funcionando fora do cadastro.",
-            "Reapresentar em competência com folga de capacidade de UTI, dentro de quatro meses da alta.",
+            "Reapresentar em competência com folga de capacidade de UTI, dentro da janela de seis meses para reapresentação, confirmada com o gestor.",
         ],
         [LEITOS, CENSO, HABILITACOES, SISAIH, CRITICAS],
         ["Espelho do CNES", "Censo de UTI", "Portaria de habilitação dos leitos de UTI"],
@@ -235,11 +235,11 @@ KITS: list[dict[str, Any]] = [
         "Conferir no SIGTAP a quantidade máxima e no prontuário quantas vezes o procedimento foi feito.",
     ),
     _kit(
-        "040008", "Fora do prazo de quatro meses",
-        "A AIH foi apresentada mais de quatro meses depois da alta.",
-        "PRAZO_VENCIDO", "NENHUM",
+        "040008", "Rejeição por prazo: conferir histórico",
+        "A apresentação foi rejeitada por prazo. Conferir se há apresentação anterior e enquadramento na janela de reapresentação.",
+        "INVESTIGAR", "SESA",
         [
-            "Não há reapresentação pela via normal.",
+            "Conferir apresentação inicial (quatro meses) e reapresentação (seis meses desde a alta), conforme o histórico e o gestor.",
             "Registrar por que atrasou (auditoria, documento, sistema) para não repetir.",
         ],
         [SISAIH],
@@ -267,7 +267,7 @@ KITS: list[dict[str, Any]] = [
         "JA_RECEBIDA", "NENHUM",
         [
             "Confirmar a aprovação no processamento indicado.",
-            "Não reapresentar: o valor já entrou.",
+            "Conferir a aprovação anterior e evitar duplicidade; recebimento exige conciliação financeira.",
             "Ver por que a AIH foi enviada duas vezes.",
         ],
         [SISAIH, CRITICAS],

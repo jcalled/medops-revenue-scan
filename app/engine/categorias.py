@@ -7,9 +7,8 @@ da lista cai em OUTROS: aparece no scan, com confiança baixa, em vez de sumir.
 Código sem descrição oficial (060221, por exemplo) também fica em OUTROS —
 classificá-lo seria adivinhar.
 
-Uma AIH com vários motivos entra numa categoria só, a mais acionável. Se ela
-tem um problema de CNES e um bloqueio administrativo, corrigir o CNES é o que
-está ao alcance do hospital; somar nas duas contaria o mesmo dinheiro duas vezes.
+Uma AIH com vários motivos entra numa categoria só. Bloqueios, motivos
+desconhecidos e prazo têm prioridade: corrigir outro motivo não os resolve.
 """
 from __future__ import annotations
 
@@ -45,7 +44,7 @@ CATEGORIAS: tuple[Categoria, ...] = (
     ),
     Categoria(
         "CAPACIDADE", "Diárias acima da capacidade instalada", "AIH_REJECTION", 85,
-        "Conferir os leitos SUS no CNES e distribuir as AIH entre competências, dentro do prazo de quatro meses, "
+        "Conferir os leitos SUS no CNES e a regra de capacidade do gestor para a reapresentação, "
         "antes do fechamento do lote.",
         frozenset({"060082", "060084", "060083", "060188", "060189", "060149"}),
     ),
@@ -96,6 +95,10 @@ _POR_MOTIVO = {motivo: c for c in CATEGORIAS for motivo in c.motivos}
 
 
 def categorizar(motivos: Iterable[str]) -> Categoria:
-    """A categoria mais acionável entre os motivos de uma AIH."""
+    """Prioriza impedimentos; sem eles, escolhe a categoria operacional."""
     encontradas = {_POR_MOTIVO.get(m, OUTROS) for m in motivos}
+    # Um bloqueio ou motivo desconhecido não desaparece ao corrigir outro motivo.
+    for codigo in ("ADMINISTRATIVO", "OUTROS", "PRAZO"):
+        if POR_CODIGO[codigo] in encontradas:
+            return POR_CODIGO[codigo]
     return min(encontradas, key=lambda c: _ORDEM[c.codigo]) if encontradas else OUTROS
