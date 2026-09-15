@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
-from app.api.routes import dados, explorar, gestao, health, me, organizacoes, prospeccao, prova, recuperacao, scan
+from app.api.routes import dados, explorar, gestao, health, kit, me, organizacoes, prospeccao, prova, recuperacao, scan
 from app.config import get_settings
 
 
@@ -26,6 +26,7 @@ def create_app() -> FastAPI:
     app.include_router(recuperacao.router)
     app.include_router(gestao.router)
     app.include_router(prospeccao.router)
+    app.include_router(kit.router)
     return app
 
 
