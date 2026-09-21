@@ -127,3 +127,29 @@ def test_ranking_por_quanto_falta_e_por_quanto_ja_recupera(app_com_nucleo, fabri
     assert por_recuperado["hospitais"][0]["cnes"] == HRVJ
     assert http.get("/api/revenue-scan/recovery-report/ranking?ordem=xyz",
                     headers={"Authorization": f"Bearer {token()}"}).status_code == 422
+
+
+def test_simulacao_faturasus_no_dado_publico(app_com_nucleo, fabrica_sessao):
+    from app.models import SihPrevention
+
+    _dados(fabrica_sessao)
+    with fabrica_sessao() as db:
+        aplicar(db)
+        db.add(SihPrevention(uf="CE", competencia="202606", cnes=HRVJ, n_aih="P1", grupo="PEGARIA", pegaria=True,
+                             motivos=[], falhas=["SUS_CBO_PROC_INCOMP"], avisos=[],
+                             mensagens=[{"code": "SUS_CBO_PROC_INCOMP", "status": "FAIL", "message": "CBO 225125 não executa o procedimento."}]))
+        db.add(SihPrevention(uf="CE", competencia="202606", cnes=HRVJ, n_aih="H1", grupo="PRECISA_ARQUIVO", pegaria=False,
+                             motivos=[], falhas=[], avisos=[], mensagens=[]))
+        db.commit()
+    http, _ = app_com_nucleo(lambda r: httpx.Response(200, json=contrato()))
+
+    rel = _get(http, f"/api/revenue-scan/recovery-report?cnes={HRVJ},{HRC}&referencia=202610")
+    simulacao = {s["grupo"]: (s["aih"], s["valor"]) for s in rel["simulacao"]}
+    # Só o que ainda dá para recuperar entra; capacidade e prazo vencido ficam de fora.
+    assert simulacao == {"PEGARIA": (1, 1000.0), "PRECISA_ARQUIVO": (1, 2000.0), "SEM_AVALIACAO": (4, 6000.0)}
+    assert rel["simulacao_nomes"]["PEGARIA"] == "O FaturaSUS já aponta o erro"
+
+    pacote = _get(http, f"/api/revenue-scan/recovery-report/package?cnes={HRVJ}&referencia=202610")
+    p1 = next(a for m in pacote["hospitais"][0]["motivos"] for a in m["aih"] if a["n_aih"] == "P1")
+    assert p1["faturasus"] == {"grupo": "PEGARIA", "regras": ["SUS_CBO_PROC_INCOMP"], "mensagem": "CBO 225125 não executa o procedimento."}
+    assert next(l for l in pacote["planilha"] if l["n_aih"] == "H1")["faturasus_aponta"] == "Precisa do arquivo do hospital"

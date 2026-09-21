@@ -32,7 +32,8 @@ from app.domain.kit import NA_LISTA_DE_TRABALHO, RECUPERAVEIS, classificar
 from app.domain.kits_motivo import classes_confirmadas
 from app.domain.prova import aih_rejeitadas
 from app.domain.resumo import _lotes, _nomes
-from app.models import SihApprovedAih
+from app.domain.prevencao import GRUPOS as GRUPOS_FATURASUS
+from app.models import SihApprovedAih, SihPrevention
 
 GRUPOS = {
     "RECUPERADA": "Já recuperada",
@@ -44,6 +45,8 @@ GRUPOS = {
 # Motivos que o botão de correção do FaturaSUS resolve quando o hospital manda o TXT do SISAIH01.
 MOTIVOS_DO_BOTAO = frozenset({"060017", "060197", "060072", "060055", "060109", "060065", "060150"})
 MOTIVOS_NO_HOSPITAL = 5
+# O que o FaturaSUS disse de cada AIH ainda recuperável, com o dado público (prevenção da carga).
+SIMULACAO = {**GRUPOS_FATURASUS, "PEGARIA": "O FaturaSUS já aponta o erro", "SEM_AVALIACAO": "Ainda não avaliada"}
 
 
 def _soma() -> dict[str, float]:
@@ -82,6 +85,24 @@ def _aprovacoes(db: Session, n_aih: list[str]) -> dict[str, list[tuple[str, floa
     return saida
 
 
+def _prevencao(db: Session, linhas: list[dict[str, Any]]) -> dict[tuple[str, str], SihPrevention]:
+    saida: dict[tuple[str, str], SihPrevention] = {}
+    chaves = {(l["n_aih"], l["competencia"]) for l in linhas}
+    for lote in _lotes(sorted({n for n, _ in chaves})):
+        for p in db.execute(select(SihPrevention).where(SihPrevention.n_aih.in_(lote))).scalars():
+            if (p.n_aih, p.competencia) in chaves:
+                saida[(p.n_aih, p.competencia)] = p
+    return saida
+
+
+def _apontamento(p: SihPrevention | None) -> dict[str, Any]:
+    if p is None:
+        return {"grupo": "SEM_AVALIACAO", "regras": [], "mensagem": None}
+    regras = sorted({*(p.falhas or []), *(p.avisos or [])}) if p.pegaria else []
+    mensagem = next((m.get("message") for m in p.mensagens or [] if m.get("code") in regras), None)
+    return {"grupo": p.grupo, "regras": regras, "mensagem": mensagem}
+
+
 def _novo_bloco() -> dict[str, Any]:
     return {"rejeitadas": _soma(), **{g: _soma() for g in GRUPOS}, "botao": _soma(), "vence_neste_mes": _soma()}
 
@@ -99,15 +120,21 @@ def _taxa(bloco: dict[str, Any], recuperado_cobravel: float, percentual: float) 
     }
 
 
+def _simulacao(somas: dict[str, dict[str, float]]) -> list[dict[str, Any]]:
+    return [{"grupo": g, "nome": SIMULACAO[g], **_fechar(somas[g])} for g in SIMULACAO if somas.get(g, {}).get("aih")]
+
+
 def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia: str, *,
                      percentual: float = 15.0, inicio: str | None = None) -> dict[str, Any]:
     linhas = aih_rejeitadas(db, cnes, meses)
     nomes = _nomes(db, cnes)
     confirmados = classes_confirmadas(db)
     aprovacoes = _aprovacoes(db, [l["n_aih"] for l in linhas])
+    prevencao = _prevencao(db, linhas)
 
     hospitais: dict[str, dict[str, Any]] = {}
     geral = _novo_bloco()
+    geral_simulacao: dict[str, dict[str, float]] = defaultdict(_soma)
     geral_recuperado_mes: dict[str, dict[str, float]] = defaultdict(_soma)
     geral_cobravel = 0.0
     for l in linhas:
@@ -118,6 +145,7 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
             "cnes": l["cnes"], "nome": nomes.get(l["cnes"]), "total": _novo_bloco(),
             "meses": defaultdict(_novo_bloco), "recuperado_por_mes": defaultdict(_soma),
             "motivos": defaultdict(lambda: {**_soma(), "descricao": None}), "cobravel": 0.0,
+            "simulacao": defaultdict(_soma),
         })
         mes = h["meses"][l["competencia"]]
         codigos = {m["codigo"] for m in l["motivos"]}
@@ -148,6 +176,9 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
                 alvo = h["motivos"][m["codigo"]]
                 _somar(alvo, valor)
                 alvo["descricao"] = m["descricao"]
+            simulado = _apontamento(prevencao.get((l["n_aih"], l["competencia"])))["grupo"]
+            _somar(h["simulacao"][simulado], valor)
+            _somar(geral_simulacao[simulado], valor)
 
     def linha_hospital(h: dict[str, Any]) -> dict[str, Any]:
         motivos = sorted(h["motivos"].items(), key=lambda kv: -kv[1]["valor"])[:MOTIVOS_NO_HOSPITAL]
@@ -158,6 +189,7 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
             "recuperado_por_mes": [{"competencia": c, **_fechar(v)} for c, v in sorted(h["recuperado_por_mes"].items())],
             "motivos": [{"codigo": c, "descricao": v["descricao"], **_fechar(v)} for c, v in motivos],
             "taxa": _taxa(h["total"], h["cobravel"], percentual),
+            "simulacao": _simulacao(h["simulacao"]),
         }
 
     lista = sorted((linha_hospital(h) for h in hospitais.values()),
@@ -172,6 +204,8 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
         "total": _fechar_bloco(geral),
         "recuperado_por_mes": [{"competencia": c, **_fechar(v)} for c, v in sorted(geral_recuperado_mes.items())],
         "taxa": _taxa(geral, geral_cobravel, percentual),
+        "simulacao": _simulacao(geral_simulacao),
+        "simulacao_nomes": SIMULACAO,
         "hospitais": lista,
         "sem_rejeicao": sorted(set(cnes) - set(hospitais)),
         "gerado_em": date.today().isoformat(),
@@ -198,6 +232,7 @@ def montar_pacote(db: Session, cnes: list[str], meses: list[str], referencia: st
         if grupo in ("A_RECUPERAR", "DEPENDE_GESTOR"):
             abertas.append((l, classe, prazo, grupo))
     kits = kits_usados(db, {m["codigo"] for l, *_ in abertas for m in l["motivos"]})
+    prevencao = _prevencao(db, [l for l, *_ in abertas])
 
     hospitais: dict[str, dict[str, Any]] = {}
     planilha = []
@@ -211,7 +246,7 @@ def montar_pacote(db: Session, cnes: list[str], meses: list[str], referencia: st
             _somar(h["vence_neste_mes"], l["valor"])
         aih = {"n_aih": l["n_aih"], "competencia": l["competencia"], "dt_saida": l["dt_saida"], "prazo": prazo,
                "valor": l["valor"], "procedimento": l["procedimento"], "grupo": grupo, "botao_faturasus": botao,
-               "motivos": codigos}
+               "motivos": codigos, "faturasus": _apontamento(prevencao.get((l["n_aih"], l["competencia"])))}
         for m in l["motivos"] or [{"codigo": "SEM_MOTIVO", "descricao": "Motivo não publicado no ER"}]:
             alvo = h["motivos"].setdefault(m["codigo"], {"codigo": m["codigo"], "descricao": m["descricao"],
                                                          "kit": kits.get(m["codigo"]), "total": _soma(), "aih": []})
@@ -224,6 +259,7 @@ def montar_pacote(db: Session, cnes: list[str], meses: list[str], referencia: st
                 "motivo": m["codigo"], "descricao": m["descricao"], "grupo": GRUPOS[grupo],
                 "onde_corrigir": kit.get("onde_nome"), "o_que_fazer": " | ".join(kit.get("passos") or []),
                 "regra": kit.get("fonte"), "botao_faturasus": "sim, com o TXT do hospital" if botao else "não",
+                "faturasus_aponta": aih["faturasus"]["mensagem"] or SIMULACAO[aih["faturasus"]["grupo"]],
             })
 
     saida = []
