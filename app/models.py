@@ -801,3 +801,52 @@ class AlertIssue(Base):
     gerado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (UniqueConstraint("organization_id", "competencia", name="uq_alert_issues"),)
+
+
+class HomologationBatch(Base):
+    """
+    Lote de homologação: as AIH rejeitadas de um mês, com o que o sistema diz de
+    cada uma, para o faturamento do hospital conferir. É o que mede, por regra, se
+    o FaturaSUS acerta — e só regra que se prova pode corrigir sozinha.
+    """
+
+    __tablename__ = "homologation_batches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    titulo: Mapped[str] = mapped_column(String(200), nullable=False)
+    organization_id: Mapped[int | None] = mapped_column(
+        ForeignKey("management_organizations.id", ondelete="SET NULL"), index=True)
+    cnes: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    competencia: Mapped[str] = mapped_column(String(6), nullable=False)
+    criado_por: Mapped[int | None] = mapped_column(Integer)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    itens: Mapped[list[HomologationItem]] = relationship(
+        back_populates="lote", cascade="all, delete-orphan", order_by="HomologationItem.id")
+
+
+class HomologationItem(Base):
+    """Uma AIH do lote: o que o sistema disse, e o parecer de quem conferiu."""
+
+    __tablename__ = "homologation_items"
+
+    id: Mapped[int] = mapped_column(_ID, primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("homologation_batches.id", ondelete="CASCADE"), nullable=False, index=True)
+    n_aih: Mapped[str] = mapped_column(String(13), nullable=False)
+    cnes: Mapped[str] = mapped_column(String(7), nullable=False)
+    valor: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    motivos: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    # O que foi julgado: FATURASUS (o achado da regra) ou KIT (a orientação do motivo).
+    origem: Mapped[str] = mapped_column(String(10), nullable=False)
+    regras: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    o_que_diz: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    correcao: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # CERTO | ERRADO | PARCIAL | NAO_SEI; vazio enquanto ninguém conferiu.
+    veredito: Mapped[str | None] = mapped_column(String(10))
+    comentario: Mapped[str | None] = mapped_column(Text)
+    respondido_por: Mapped[str | None] = mapped_column(String(120))
+    respondido_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    lote: Mapped[HomologationBatch] = relationship(back_populates="itens")
+
+    __table_args__ = (UniqueConstraint("batch_id", "n_aih", name="uq_homologation_items"),)
