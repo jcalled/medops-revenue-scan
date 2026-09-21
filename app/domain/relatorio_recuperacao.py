@@ -33,7 +33,7 @@ from app.domain.kits_motivo import classes_confirmadas
 from app.domain.prova import aih_rejeitadas
 from app.domain.resumo import _lotes, _nomes
 from app.domain.prevencao import GRUPOS as GRUPOS_FATURASUS
-from app.models import SihApprovedAih, SihPrevention
+from app.models import SiaApacMonth, SihApprovedAih, SihPrevention
 
 GRUPOS = {
     "RECUPERADA": "Já recuperada",
@@ -101,6 +101,59 @@ def _apontamento(p: SihPrevention | None) -> dict[str, Any]:
     regras = sorted({*(p.falhas or []), *(p.avisos or [])}) if p.pegaria else []
     mensagem = next((m.get("message") for m in p.mensagens or [] if m.get("code") in regras), None)
     return {"grupo": p.grupo, "regras": regras, "mensagem": mensagem}
+
+
+def _apac(db: Session, cnes: list[str], meses: list[str]) -> dict[str, dict[str, Any]]:
+    """APAC do SIA nos mesmos meses: produzido, aprovado e não aprovado — quase todo teto do gestor."""
+    por_cnes: dict[str, dict[str, Any]] = {}
+    for lote in _lotes(cnes):
+        for a in db.execute(select(SiaApacMonth).where(SiaApacMonth.cnes.in_(lote), SiaApacMonth.competencia.in_(meses))).scalars():
+            h = por_cnes.setdefault(a.cnes, {"produzido": 0.0, "aprovado": 0.0, "nao_aprovado": 0.0, "teto": 0.0,
+                                             "ocorrencias": defaultdict(lambda: {"linhas": 0, "valor": 0.0, "nome": ""}),
+                                             "procedimentos": defaultdict(float), "meses": []})
+            h["produzido"] += float(a.valor_produzido)
+            h["aprovado"] += float(a.valor_aprovado)
+            h["nao_aprovado"] += float(a.valor_nao_aprovado)
+            h["teto"] += float(a.valor_teto)
+            h["meses"].append(a.competencia)
+            for codigo, o in (a.ocorrencias or {}).items():
+                h["ocorrencias"][codigo]["linhas"] += o.get("linhas", 0)
+                h["ocorrencias"][codigo]["valor"] += o.get("valor", 0.0)
+                h["ocorrencias"][codigo]["nome"] = o.get("nome", "")
+            for p in a.procedimentos or []:
+                h["procedimentos"][p["procedimento"]] += p["valor"]
+    return {c: _fechar_apac(h) for c, h in por_cnes.items()}
+
+
+def _fechar_apac(h: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "produzido": round(h["produzido"], 2), "aprovado": round(h["aprovado"], 2),
+        "nao_aprovado": round(h["nao_aprovado"], 2), "teto": round(h["teto"], 2),
+        "ocorrencias": sorted(({"codigo": c, **{**o, "valor": round(o["valor"], 2)}} for c, o in h["ocorrencias"].items()),
+                              key=lambda o: -o["valor"]),
+        "procedimentos": [{"procedimento": p, "valor": round(v, 2)}
+                          for p, v in sorted(h["procedimentos"].items(), key=lambda kv: -kv[1])[:5]],
+        "meses": sorted(set(h["meses"])),
+    }
+
+
+def _somar_apac(itens: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not itens:
+        return None
+    total = {"produzido": 0.0, "aprovado": 0.0, "nao_aprovado": 0.0, "teto": 0.0,
+             "ocorrencias": defaultdict(lambda: {"linhas": 0, "valor": 0.0, "nome": ""}),
+             "procedimentos": defaultdict(float), "meses": []}
+    for h in itens:
+        for chave in ("produzido", "aprovado", "nao_aprovado", "teto"):
+            total[chave] += h[chave]
+        for o in h["ocorrencias"]:
+            total["ocorrencias"][o["codigo"]]["linhas"] += o["linhas"]
+            total["ocorrencias"][o["codigo"]]["valor"] += o["valor"]
+            total["ocorrencias"][o["codigo"]]["nome"] = o["nome"]
+        for p in h["procedimentos"]:
+            total["procedimentos"][p["procedimento"]] += p["valor"]
+        total["meses"] += h["meses"]
+    return _fechar_apac(total)
 
 
 def _novo_bloco() -> dict[str, Any]:
@@ -190,11 +243,15 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
             "motivos": [{"codigo": c, "descricao": v["descricao"], **_fechar(v)} for c, v in motivos],
             "taxa": _taxa(h["total"], h["cobravel"], percentual),
             "simulacao": _simulacao(h["simulacao"]),
+            "apac": None,
         }
 
+    apac = _apac(db, cnes, meses)
     lista = sorted((linha_hospital(h) for h in hospitais.values()),
                    key=lambda h: -(h["total"]["A_RECUPERAR"]["valor"] + h["total"]["DEPENDE_GESTOR"]["valor"]
                                    + h["total"]["RECUPERADA"]["valor"]))
+    for h in lista:
+        h["apac"] = apac.get(h["cnes"])
     return {
         "referencia": referencia,
         "meses": meses,
@@ -206,6 +263,7 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
         "taxa": _taxa(geral, geral_cobravel, percentual),
         "simulacao": _simulacao(geral_simulacao),
         "simulacao_nomes": SIMULACAO,
+        "apac": _somar_apac(list(apac.values())),
         "hospitais": lista,
         "sem_rejeicao": sorted(set(cnes) - set(hospitais)),
         "gerado_em": date.today().isoformat(),

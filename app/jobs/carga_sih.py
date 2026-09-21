@@ -338,6 +338,13 @@ def job_carregar_uf(uf: str, competencias: list[str] | None = None, quantidade: 
                 logger.exception("Municípios do IBGE não carregados")
         resultados = carregar_uf(db, uf, competencias=competencias, quantidade=quantidade, cnes_api=cnes_api)
         try:
+            from app.jobs.carga_sia import carregar_apac
+
+            carregar_apac(db, validar_uf(uf), [r.competencia for r in resultados])
+        except Exception:  # noqa: BLE001 — a APAC é indicador à parte; o SIH já está gravado
+            db.rollback()
+            logger.exception("APAC do SIA de %s não carregada", uf)
+        try:
             carregar_cnes_uf(db, uf)
         except Exception:  # noqa: BLE001 — sem leitos o scan sai sem porte, mas sai
             logger.exception("Leitos e habilitações do CNES de %s não carregados", uf)

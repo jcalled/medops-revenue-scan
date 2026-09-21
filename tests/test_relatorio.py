@@ -153,3 +153,26 @@ def test_simulacao_faturasus_no_dado_publico(app_com_nucleo, fabrica_sessao):
     p1 = next(a for m in pacote["hospitais"][0]["motivos"] for a in m["aih"] if a["n_aih"] == "P1")
     assert p1["faturasus"] == {"grupo": "PEGARIA", "regras": ["SUS_CBO_PROC_INCOMP"], "mensagem": "CBO 225125 não executa o procedimento."}
     assert next(l for l in pacote["planilha"] if l["n_aih"] == "H1")["faturasus_aponta"] == "Precisa do arquivo do hospital"
+
+
+def test_apac_acima_do_teto_fica_a_parte(app_com_nucleo, fabrica_sessao):
+    from app.models import SiaApacMonth
+
+    _dados(fabrica_sessao)
+    with fabrica_sessao() as db:
+        db.add(SiaApacMonth(uf="CE", competencia="202606", cnes=HRVJ, linhas=3, valor_produzido=1850, valor_aprovado=1000,
+                            valor_nao_aprovado=850, valor_teto=800,
+                            ocorrencias={"5O": {"linhas": 1, "valor": 800.0, "nome": "Ultrapassou o teto financeiro"},
+                                         "4Q": {"linhas": 1, "valor": 50.0, "nome": "Procedimento sem valor unitário"}},
+                            procedimentos=[{"procedimento": "0304050024", "valor": 800.0}]))
+        db.add(SiaApacMonth(uf="CE", competencia="201901", cnes=HRVJ, linhas=1, valor_produzido=5, valor_aprovado=0,
+                            valor_nao_aprovado=5, valor_teto=5, ocorrencias={}, procedimentos=[]))  # fora do período
+        db.commit()
+    http, _ = app_com_nucleo(lambda r: httpx.Response(200, json=contrato()))
+    rel = _get(http, f"/api/revenue-scan/recovery-report?cnes={HRVJ},{HRC}&referencia=202610")
+    apac = next(h for h in rel["hospitais"] if h["cnes"] == HRVJ)["apac"]
+    assert (apac["produzido"], apac["nao_aprovado"], apac["teto"]) == (1850.0, 850.0, 800.0)
+    assert apac["ocorrencias"][0]["codigo"] == "5O" and apac["meses"] == ["202606"]
+    assert rel["total"]["A_RECUPERAR"]["valor"] == 3700.0          # a APAC não entra no recuperável
+    assert rel["apac"]["teto"] == 800.0
+    assert next(h for h in rel["hospitais"] if h["cnes"] == HRC)["apac"] is None

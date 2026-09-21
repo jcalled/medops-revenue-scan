@@ -734,3 +734,31 @@ class ContractFile(_Privado, Base):
     __table_args__ = (
         Index("ix_contract_files_tenant_org", "tenant_id", "organization_id"),
     )
+
+
+class SiaApacMonth(_Publico, Base):
+    """
+    APAC de um hospital num processamento do SIA (arquivo PA): produzido,
+    aprovado e o que não foi aprovado, por ocorrência oficial. Agregado: o PA de
+    uma UF grande passa de milhões de linhas.
+    """
+
+    __tablename__ = "sia_apac_month"
+
+    id: Mapped[int] = mapped_column(_ID, primary_key=True)
+    uf: Mapped[str] = mapped_column(String(2), nullable=False)
+    competencia: Mapped[str] = mapped_column(String(6), nullable=False)
+    cnes: Mapped[str] = mapped_column(String(7), nullable=False)
+    linhas: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    valor_produzido: Mapped[Decimal] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    valor_aprovado: Mapped[Decimal] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    valor_nao_aprovado: Mapped[Decimal] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    # Parte do não aprovado que é teto físico/financeiro ou falta de orçamento: depende do gestor.
+    valor_teto: Mapped[Decimal] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    ocorrencias: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False, default=dict)
+    procedimentos: Mapped[list[dict[str, Any]]] = mapped_column(_JSON, nullable=False, default=list)
+
+    __table_args__ = (
+        UniqueConstraint("uf", "competencia", "cnes", name="uq_sia_apac_month"),
+        Index("ix_sia_apac_month_cnes", "cnes", "competencia"),
+    )
