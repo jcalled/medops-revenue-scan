@@ -272,6 +272,90 @@ def _cenarios(bloco: dict[str, Any], antes_do_envio: dict[str, dict[str, float]]
     }
 
 
+# Os três baldes do valor não aprovado: cada um tem dono e caminho diferentes.
+# Erro na conta se previne e se reapresenta; capacidade, leito e habilitação no
+# CNES se previnem e se pedem ao gestor (não voltam pela conta); bloqueio do
+# gestor vira ofício.
+BALDES = {"conta": "Erro na conta", "cnes": "Capacidade, leito e habilitação no CNES", "gestor": "Bloqueio do gestor"}
+_BALDE_CNES = frozenset({"CAPACIDADE", "LEITO_CNES", "HABILITACAO_SERVICO"})
+_BALDE_GESTOR = frozenset({"ADMINISTRATIVO"})
+# Base da estimativa do mês que vem: os últimos meses carregados.
+MESES_DA_ESTIMATIVA = 3
+
+
+def balde(categoria: str) -> str:
+    return "cnes" if categoria in _BALDE_CNES else "gestor" if categoria in _BALDE_GESTOR else "conta"
+
+
+def _novo_mes() -> dict[str, Any]:
+    return {"bloco": _novo_bloco(), "baldes": {b: _soma() for b in BALDES}, "apontado": _soma()}
+
+
+def _meses_um_a_um(db: Session, cnes: list[str], meses: list[str], referencia: str,
+                   confirmados: dict[str, str]) -> dict[str, dict[str, Any]]:
+    """
+    Cada processamento por si, como se fosse escolhido sozinho: a AIH rejeitada
+    em junho e de novo em julho entra nos dois meses. No total do período ela
+    conta uma vez só (no último); aqui, para comparar mês com mês.
+    """
+    saida: dict[str, dict[str, Any]] = {}
+    for competencia in meses:
+        linhas = aih_rejeitadas(db, cnes, [competencia])
+        prevencao = _prevencao(db, linhas)
+        m = saida[competencia] = _novo_mes()
+        for l in linhas:
+            classe, _ = classificar(l, referencia, confirmados)
+            grupo = _grupo(l, classe)
+            _somar(m["bloco"]["rejeitadas"], l["valor"])
+            _somar(m["bloco"][grupo], l["valor"])
+            if grupo == "JA_APROVADA":
+                continue
+            _somar(m["baldes"][balde(l["categoria"])], l["valor"])
+            if _apontamento(prevencao.get((l["n_aih"], l["competencia"])))["grupo"] == "PEGARIA":
+                _somar(m["apontado"], l["valor"])
+    return saida
+
+
+def _serie_mensal(meses: dict[str, dict[str, Any]], recuperado: dict[str, dict[str, float]]) -> list[dict[str, Any]]:
+    """Uma linha por processamento: o rejeitado nos baldes, o que seria apontado e a situação de hoje das AIH dele."""
+    return [{
+        "competencia": c, **_fechar_bloco(m["bloco"]),
+        "baldes": {b: _fechar(v) for b, v in m["baldes"].items()},
+        "apontado": _fechar(m["apontado"]),
+        # Aprovado NESTE mês de AIH rejeitadas antes (por mês de aprovação, não de rejeição).
+        "voltou_no_mes": _fechar(recuperado.get(c, _soma())),
+    } for c, m in sorted(meses.items())]
+
+
+def _proximo_mes(serie: list[dict[str, Any]], vencimentos: dict[str, dict[str, float]], referencia: str,
+                 reapresentavel: dict[str, float]) -> dict[str, Any]:
+    """
+    O que esperar: o que vence e o que dá para reapresentar é CONHECIDO (prazo de
+    cada AIH); o que vai ser rejeitado é ESTIMADO (média dos últimos meses).
+    """
+    from app.domain.recuperacao import mais_meses
+
+    base = serie[-MESES_DA_ESTIMATIVA:]
+    n = len(base) or 1
+    media = lambda f: round(sum(f(m) for m in base) / n, 2)  # noqa: E731
+    proximo = mais_meses(referencia, 1)
+    return {
+        "referencia": referencia,
+        "proximo": proximo,
+        "reapresentavel": _fechar(reapresentavel),
+        "vence_neste_mes": _fechar(vencimentos.get(referencia, _soma())),
+        "vence_no_proximo": _fechar(vencimentos.get(proximo, _soma())),
+        "vencimentos": [{"prazo": p, **_fechar(v)} for p, v in sorted(vencimentos.items()) if p >= referencia],
+        "estimativa": {
+            "meses_base": [m["competencia"] for m in base],
+            "rejeitado": media(lambda m: m["rejeitadas"]["valor"]),
+            "baldes": {b: media(lambda m, b=b: m["baldes"][b]["valor"]) for b in BALDES},
+            "apontado": media(lambda m: m["apontado"]["valor"]),
+            "voltou_sozinho": media(lambda m: m["voltou_no_mes"]["valor"]),
+        },
+    }
+
+
 def _novo_bloco() -> dict[str, Any]:
     return {"rejeitadas": _soma(), **{g: _soma() for g in GRUPOS}, "botao": _soma(), "vence_neste_mes": _soma(),
             "ALTA": _soma()}
@@ -322,6 +406,7 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
     # Prevenção: de tudo o que foi rejeitado no período, o que o FaturaSUS teria apontado antes do envio.
     geral_antes_do_envio: dict[str, dict[str, float]] = defaultdict(_soma)
     geral_recuperado_mes: dict[str, dict[str, float]] = defaultdict(_soma)
+    vencimentos: dict[str, dict[str, float]] = defaultdict(_soma)
     geral_cobravel = 0.0
     for l in linhas:
         classe, prazo = classificar(l, referencia, confirmados)
@@ -363,6 +448,8 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
         else:
             valor_grupo = valor
 
+        if grupo in ("A_RECUPERAR", "DEPENDE_GESTOR") and prazo:
+            _somar(vencimentos[prazo], valor)
         for bloco in (h["total"], mes, geral):
             _somar(bloco["rejeitadas"], valor)
             _somar(bloco[grupo], valor_grupo)
@@ -415,9 +502,17 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
                                   "nao_volta": {"aih": 0, "valor": 0.0}, "media_mensal": round(h["apac"]["teto"] / n, 2),
                                   "como_evitar": APAC_COMO_EVITAR, "motivos": []})
             h["prevenir"].sort(key=lambda p: -p["media_mensal"])
+    serie = _serie_mensal(_meses_um_a_um(db, cnes, meses, referencia, confirmados), geral_recuperado_mes)
+    reapresentavel = _soma()
+    for g in ("A_RECUPERAR", "DEPENDE_GESTOR"):
+        reapresentavel["aih"] += geral[g]["aih"]
+        reapresentavel["valor"] += geral[g]["valor"]
     return {
         "referencia": referencia,
         "meses": meses,
+        "por_mes": serie,
+        "baldes": BALDES,
+        "proximo_mes": _proximo_mes(serie, vencimentos, referencia, reapresentavel),
         "percentual": percentual,
         "inicio": inicio,
         "grupos": GRUPOS,

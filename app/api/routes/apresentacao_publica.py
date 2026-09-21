@@ -40,7 +40,8 @@ def _hash(token: str) -> str:
 
 
 def _retrato(relatorio: dict[str, Any], mostrar_honorarios: bool) -> dict[str, Any]:
-    retrato = {k: relatorio.get(k) for k in ("recorte", "meses", "referencia", "total", "cenarios", "antes_do_envio", "gerado_em")}
+    retrato = {k: relatorio.get(k) for k in ("recorte", "meses", "referencia", "total", "cenarios", "antes_do_envio", "gerado_em",
+                                             "por_mes", "baldes", "proximo_mes")}
     retrato["percentual"] = relatorio.get("percentual") if mostrar_honorarios else None
     retrato["hospitais"] = [{k: h.get(k) for k in _CAMPOS_HOSPITAL} for h in relatorio.get("hospitais", [])]
     if not mostrar_honorarios:
@@ -57,6 +58,9 @@ class PedidoLink(BaseModel):
     mostrar_honorarios: bool = False
     percentual: float = Field(default=15, ge=0, le=100)
     dias: int = Field(default=30, ge=1, le=180)
+    # Período (AAAAMM); vazio: todos os processamentos carregados.
+    de: str | None = Field(default=None, pattern=r"^\d{4}(0[1-9]|1[0-2])$")
+    ate: str | None = Field(default=None, pattern=r"^\d{4}(0[1-9]|1[0-2])$")
 
 
 def _json(p: PublicPresentation) -> dict[str, Any]:
@@ -79,7 +83,8 @@ def gerar(pedido: PedidoLink, acesso: Acesso = Depends(require_admin_plataforma)
                                                   .where(OrganizationEstablishment.organization_id == pedido.organizacao)).scalars()))
     if not cnes:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Escolha uma organização ou hospitais.")
-    meses = meses_carregados(db, cnes)
+    meses = [m for m in meses_carregados(db, cnes)
+             if (not pedido.de or m >= pedido.de) and (not pedido.ate or m <= pedido.ate)]
     if not meses:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="Sem dados carregados para estes hospitais.")
     relatorio = montar_relatorio(db, cnes, meses, referencia_padrao(), percentual=pedido.percentual)

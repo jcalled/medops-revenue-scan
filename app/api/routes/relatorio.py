@@ -36,6 +36,20 @@ router = APIRouter(prefix="/api/revenue-scan/recovery-report", tags=["relatorio"
 _AAAAMM = r"^\d{4}(0[1-9]|1[0-2])$"
 
 
+def periodo(de: str | None = Query(default=None, pattern=_AAAAMM, description="Primeiro processamento (AAAAMM)"),
+            ate: str | None = Query(default=None, pattern=_AAAAMM, description="Último processamento (AAAAMM); de = ate é um mês só"),
+            ) -> tuple[str | None, str | None]:
+    if de and ate and de > ate:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="O início do período vem depois do fim.")
+    return de, ate
+
+
+def meses_do_periodo(db: Session, cnes: list[str], intervalo: tuple[str | None, str | None]) -> list[str]:
+    """Os processamentos carregados dentro do período escolhido (vazio: todos)."""
+    de, ate = intervalo
+    return [m for m in meses_carregados(db, cnes) if (not de or m >= de) and (not ate or m <= ate)]
+
+
 @router.get("")
 def relatorio_de_recuperacao(
     f: Filtros = Depends(filtros),
@@ -43,6 +57,7 @@ def relatorio_de_recuperacao(
     inicio: str | None = Query(default=None, pattern=_AAAAMM,
                                description="Início do contrato (AAAAMM): só o aprovado a partir dele é cobrável"),
     referencia: str | None = Query(default=None, pattern=_AAAAMM),
+    intervalo: tuple[str | None, str | None] = Depends(periodo),
     acesso: Acesso = Depends(require_revenue_scan),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -53,7 +68,9 @@ def relatorio_de_recuperacao(
     recorte = {"titulo": _titulo(db, f), "filtros": {k: v for k, v in asdict(f).items() if v}}
     if not cnes:
         return {"recorte": recorte, "hospitais": [], "meses": [], "sem_dados": True}
-    meses = meses_carregados(db, cnes)
+    meses = meses_do_periodo(db, cnes, intervalo)
+    if not meses:
+        return {"recorte": recorte, "hospitais": [], "meses": [], "sem_dados": True}
     corpo = montar_relatorio(db, cnes, meses, referencia or referencia_padrao(), percentual=percentual, inicio=inicio)
     return {
         "recorte": recorte,
@@ -72,6 +89,7 @@ def relatorio_de_recuperacao(
 def pacote_de_correcao(
     f: Filtros = Depends(filtros),
     referencia: str | None = Query(default=None, pattern=_AAAAMM),
+    intervalo: tuple[str | None, str | None] = Depends(periodo),
     acesso: Acesso = Depends(require_revenue_scan),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -82,7 +100,7 @@ def pacote_de_correcao(
     recorte = {"titulo": _titulo(db, f), "filtros": {k: v for k, v in asdict(f).items() if v}}
     if not cnes:
         return {"recorte": recorte, "hospitais": [], "planilha": [], "meses": []}
-    corpo = montar_pacote(db, cnes, meses_carregados(db, cnes), referencia or referencia_padrao())
+    corpo = montar_pacote(db, cnes, meses_do_periodo(db, cnes, intervalo), referencia or referencia_padrao())
     return {
         "recorte": recorte,
         **corpo,
@@ -97,6 +115,7 @@ def pacote_de_correcao(
 @router.get("/letter")
 def oficio_para_a_secretaria(
     f: Filtros = Depends(filtros),
+    intervalo: tuple[str | None, str | None] = Depends(periodo),
     acesso: Acesso = Depends(require_revenue_scan),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -108,7 +127,7 @@ def oficio_para_a_secretaria(
     recorte = {"titulo": _titulo(db, f), "filtros": {k: v for k, v in asdict(f).items() if v}}
     if not cnes:
         return {"recorte": recorte, "hospitais": [], "meses": []}
-    corpo = montar_oficio(db, cnes, meses_carregados(db, cnes))
+    corpo = montar_oficio(db, cnes, meses_do_periodo(db, cnes, intervalo))
     ufs = {s.cnes: s.uf for s, _ in linhas}
     for h in corpo["hospitais"]:
         h["uf"] = ufs.get(h["cnes"])

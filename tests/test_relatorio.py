@@ -235,3 +235,31 @@ def test_oficio_para_a_secretaria(app_com_nucleo, fabrica_sessao):
     assert [s["codigo"] for s in hrvj["sem_descricao"]] == ["999999"]                    # motivo fora da tabela oficial
     assert hrvj["apac"]["teto"] == 800.0 and hrvj["apac"]["procedimentos"][0]["procedimento"] == "0304050024"
     assert all(h["cnes"] != HRC or not h["habilitacao"] for h in oficio["hospitais"])
+
+
+def test_mes_a_mes_periodo_e_proximo_mes(app_com_nucleo, fabrica_sessao):
+    """Série por processamento, período escolhido (um mês só) e o que esperar do mês que vem."""
+    from tests.test_dados import ADMIN, _admin
+    from tests.test_kit import _dados
+    from tests.test_scan_api import HRC, HRVJ
+
+    _dados(fabrica_sessao)
+    http = _admin(app_com_nucleo)
+    r = http.get(f"/api/revenue-scan/recovery-report?cnes={HRVJ},{HRC}&referencia=202610", headers=ADMIN).json()
+    serie = {m["competencia"]: m for m in r["por_mes"]}
+    assert set(serie) == set(r["meses"]) and "202606" in serie
+    jun = serie["202606"]
+    assert sum(b["valor"] for b in jun["baldes"].values()) + jun["JA_APROVADA"]["valor"] == jun["rejeitadas"]["valor"]
+    assert jun["baldes"]["cnes"]["valor"] == 5000.0          # V1 capacidade + H1 habilitação
+    assert jun["baldes"]["gestor"]["valor"] == 4000.0        # G1: bloqueio do gestor
+    p = r["proximo_mes"]
+    assert p["proximo"] == "202611" and p["vence_neste_mes"]["valor"] == 2000.0     # H1 vence out
+    assert p["vence_no_proximo"] == {"aih": 3, "valor": 5500.0}                     # P1, G1 (gestor) e O1 vencem nov
+    assert p["estimativa"]["meses_base"] == [m["competencia"] for m in r["por_mes"]][-3:]
+
+    so_junho = http.get(f"/api/revenue-scan/recovery-report?cnes={HRVJ},{HRC}&referencia=202610&de=202606&ate=202606",
+                        headers=ADMIN).json()
+    assert so_junho["meses"] == ["202606"] and [m["competencia"] for m in so_junho["por_mes"]] == ["202606"]
+    # A linha de junho no período todo é igual a junho escolhido sozinho.
+    assert so_junho["por_mes"][0]["rejeitadas"] == jun["rejeitadas"] and so_junho["por_mes"][0]["baldes"] == jun["baldes"]
+    assert http.get(f"/api/revenue-scan/recovery-report?cnes={HRVJ}&de=202607&ate=202606", headers=ADMIN).status_code == 422
