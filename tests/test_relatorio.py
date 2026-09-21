@@ -111,3 +111,19 @@ def test_pacote_de_correcao_por_motivo(app_com_nucleo, fabrica_sessao):
     assert next(l for l in linhas if l["n_aih"] == "P1")["botao_faturasus"].startswith("sim")
     # Capacidade e prazo vencido não entram no pacote: não há o que reapresentar.
     assert not {"V1", "Z1"} & {l["n_aih"] for l in linhas}
+
+
+def test_ranking_por_quanto_falta_e_por_quanto_ja_recupera(app_com_nucleo, fabrica_sessao):
+    _dados(fabrica_sessao)
+    http, _ = app_com_nucleo(lambda r: httpx.Response(200, json=contrato()))
+    ranking = _get(http, "/api/revenue-scan/recovery-report/ranking?uf=CE&referencia=202610")
+    assert [h["cnes"] for h in ranking["hospitais"]] == [HRVJ, HRC]          # R$ 3.000 a recuperar contra R$ 700
+    hrvj = ranking["hospitais"][0]
+    assert hrvj["a_recuperar"] == {"aih": 2, "valor": 3000.0} and hrvj["recuperado"]["valor"] == 15000.0
+    assert hrvj["taxa_recuperacao"] == round(15000 / 461900, 4)
+    assert hrvj["motivo_principal"]["codigo"] == "010003"
+
+    por_recuperado = _get(http, "/api/revenue-scan/recovery-report/ranking?uf=CE&referencia=202610&ordem=recuperado")
+    assert por_recuperado["hospitais"][0]["cnes"] == HRVJ
+    assert http.get("/api/revenue-scan/recovery-report/ranking?ordem=xyz",
+                    headers={"Authorization": f"Bearer {token()}"}).status_code == 422

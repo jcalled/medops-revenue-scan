@@ -19,7 +19,9 @@ from sqlalchemy.orm import Session
 from app.adapters.ibge import validar_uf
 from app.api.deps import Acesso, require_revenue_scan
 from app.api.routes.dados import _em_andamento, _fila_fora, require_admin_plataforma
-from app.api.routes.explorar import Filtros, _titulo, filtros, hospitais_filtrados
+from app.api.routes.explorar import (
+    NATUREZAS, Filtros, _municipios, _organizacoes_por_cnes, _titulo, filtros, hospitais_filtrados,
+)
 from app.db import get_db
 from app.domain.kit import referencia_padrao
 from app.domain.recuperacao import meses_carregados
@@ -88,6 +90,70 @@ def pacote_de_correcao(
             "regra de cada um. O arquivo corrigido sai do FaturaSUS a partir do TXT do SISAIH01 do hospital; sem ele, "
             "o hospital aplica as instruções no próprio sistema e reapresenta dentro do prazo, sem alterar datas."
         ),
+    }
+
+
+ORDENS_RANKING = {
+    "a_recuperar": lambda h: h["a_recuperar"]["valor"],
+    "vence_neste_mes": lambda h: h["vence_neste_mes"]["valor"],
+    "recuperado": lambda h: h["recuperado"]["valor"],
+    "taxa_recuperacao": lambda h: h["taxa_recuperacao"],
+    "rejeitado": lambda h: h["rejeitado"]["valor"],
+}
+MAX_RANKING = 1500
+
+
+@router.get("/ranking")
+def ranking_de_recuperacao(
+    f: Filtros = Depends(filtros),
+    ordem: str = Query(default="a_recuperar", description=", ".join(ORDENS_RANKING)),
+    limite: int = Query(default=200, ge=1, le=MAX_RANKING),
+    referencia: str | None = Query(default=None, pattern=_AAAAMM),
+    acesso: Acesso = Depends(require_revenue_scan),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Hospitais do recorte em ordem de quanto ainda dá para recuperar — ou de quanto
+    já recuperam sozinhos —, para escolher quem procurar. Sem recorte, todas as UFs
+    carregadas; pode demorar no Brasil inteiro.
+    """
+    if ordem not in ORDENS_RANKING:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Ordem desconhecida. Use {', '.join(ORDENS_RANKING)}.")
+    linhas = hospitais_filtrados(db, acesso, f)
+    if len(linhas) > MAX_RANKING * 4:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail=f"{len(linhas)} hospitais no recorte: escolha uma UF ou uma natureza para calcular.")
+    scores = {s.cnes: (s, e) for s, e in linhas}
+    cnes = list(scores)
+    recorte = {"titulo": _titulo(db, f), "filtros": {k: v for k, v in asdict(f).items() if v}}
+    if not cnes:
+        return {"recorte": recorte, "hospitais": [], "total_hospitais": 0, "meses": []}
+    meses = meses_carregados(db, cnes)
+    corpo = montar_relatorio(db, cnes, meses, referencia or referencia_padrao())
+    organizacoes = _organizacoes_por_cnes(db, cnes)
+    municipios = _municipios(db, {s.codigo_municipio for s, _ in linhas})
+
+    itens = []
+    for h in corpo["hospitais"]:
+        s, _ = scores[h["cnes"]]
+        t = h["total"]
+        base = t["rejeitadas"]["valor"] - t["JA_APROVADA"]["valor"]
+        itens.append({
+            "cnes": h["cnes"], "nome": h["nome"], "uf": s.uf,
+            "municipio": municipios.get(s.codigo_municipio or "", s.codigo_municipio),
+            "natureza": NATUREZAS.get(s.natureza_grupo or "", None), "leitos_sus": s.leitos_sus,
+            "organizacoes": organizacoes.get(h["cnes"], []),
+            "rejeitado": t["rejeitadas"], "recuperado": t["RECUPERADA"], "a_recuperar": t["A_RECUPERAR"],
+            "depende_gestor": t["DEPENDE_GESTOR"], "nao_recuperavel": t["PERDIDA"], "botao": t["botao"],
+            "vence_neste_mes": t["vence_neste_mes"],
+            # Quanto do que foi rejeitado já voltou aprovado: é o esforço de recuperação do próprio hospital.
+            "taxa_recuperacao": round(t["RECUPERADA"]["valor"] / base, 4) if base > 0 else 0.0,
+            "motivo_principal": h["motivos"][0] if h["motivos"] else None,
+        })
+    itens.sort(key=lambda h: (-ORDENS_RANKING[ordem](h), h["cnes"]))
+    return {
+        "recorte": recorte, "referencia": corpo["referencia"], "meses": meses, "ordem": ordem,
+        "total_hospitais": len(itens), "total": corpo["total"], "hospitais": itens[:limite],
     }
 
 

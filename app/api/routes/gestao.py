@@ -160,3 +160,86 @@ def buscar(q: str = Query(..., min_length=3, max_length=100), uf: str | None = Q
     else:
         achados = buscar_estabelecimentos(db, termo, uf, limite=30)
     return {"estabelecimentos": achados}
+
+
+class Importacao(BaseModel):
+    """Planilha colada ou lida na tela: uma linha por hospital, cabeçalho na primeira."""
+    conteudo: str = Field(min_length=10, max_length=2_000_000)
+    fonte: str | None = Field(default=None, max_length=500)
+
+
+_COLUNAS = {"sigla": ("sigla", "oss", "organizacao", "organização"), "nome": ("nome", "nome da oss", "razao social"),
+            "cnpj": ("cnpj",), "uf": ("uf", "estado"), "cnes": ("cnes", "cnes do hospital"),
+            "situacao": ("situacao", "situação")}
+
+
+def _cabecalho(linha: list[str]) -> dict[str, int]:
+    achado = {}
+    for i, c in enumerate(linha):
+        chave = c.strip().lower()
+        for campo, nomes in _COLUNAS.items():
+            if chave in nomes and campo not in achado:
+                achado[campo] = i
+    return achado
+
+
+@router.post("/organizations/import")
+def importar_organizacoes(dados: Importacao, _: Acesso = Depends(require_admin_plataforma),
+                          db: Session = Depends(get_db)) -> dict[str, Any]:
+    """
+    Cria as organizações que faltam (pela sigla) e vincula os hospitais pelo CNES.
+    Vínculo novo entra A_CONFIRMAR, a menos que a planilha diga CONFIRMADO: o CNES
+    não liga o hospital à OSS, então a fonte é a planilha e alguém confere.
+    """
+    import csv
+    import io
+
+    texto = dados.conteudo.lstrip("﻿")
+    separador = ";" if texto.split("\n", 1)[0].count(";") >= texto.split("\n", 1)[0].count(",") else ","
+    linhas = [l for l in csv.reader(io.StringIO(texto), delimiter=separador) if any(c.strip() for c in l)]
+    if not linhas:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Planilha vazia.")
+    colunas = _cabecalho(linhas[0])
+    if "sigla" not in colunas:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="Falta a coluna sigla (ou OSS). Colunas aceitas: sigla, nome, cnpj, uf, cnes, situacao.")
+
+    def valor(linha: list[str], campo: str) -> str:
+        i = colunas.get(campo)
+        return linha[i].strip() if i is not None and i < len(linha) else ""
+
+    criadas, vinculos, erros = [], 0, []
+    orgs = {o.sigla: o for o in db.execute(select(ManagementOrganization)
+                                            .options(selectinload(ManagementOrganization.unidades))).scalars()}
+    for numero, linha in enumerate(linhas[1:], start=2):
+        sigla = valor(linha, "sigla").upper()[:30]
+        if len(sigla) < 2:
+            erros.append(f"Linha {numero}: sem sigla.")
+            continue
+        org = orgs.get(sigla)
+        if org is None:
+            org = ManagementOrganization(sigla=sigla, nome=valor(linha, "nome") or sigla,
+                                         cnpj=re.sub(r"\D", "", valor(linha, "cnpj")) or None,
+                                         uf=(valor(linha, "uf").upper() or None) if len(valor(linha, "uf")) == 2 else None,
+                                         fonte=dados.fonte)
+            db.add(org)
+            orgs[sigla] = org
+            criadas.append(sigla)
+        cnes = re.sub(r"\D", "", valor(linha, "cnes"))
+        if not cnes:
+            continue
+        if len(cnes) > 7:
+            erros.append(f"Linha {numero}: CNES {cnes} com mais de 7 dígitos.")
+            continue
+        situacao = "CONFIRMADO" if valor(linha, "situacao").upper().startswith("CONFIRM") else "A_CONFIRMAR"
+        unidade = next((u for u in org.unidades if u.cnes == cnes.zfill(7)), None)
+        if unidade is None:
+            unidade = OrganizationEstablishment(cnes=cnes.zfill(7), situacao=situacao, fonte=dados.fonte)
+            org.unidades.append(unidade)
+            vinculos += 1
+        elif situacao == "CONFIRMADO":
+            unidade.situacao = situacao
+        if situacao == "CONFIRMADO":
+            unidade.verificado_em = date.today()
+    db.commit()
+    return {"organizacoes_criadas": criadas, "vinculos_novos": vinculos, "erros": erros[:50]}
