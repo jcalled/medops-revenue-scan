@@ -174,6 +174,8 @@ class SihApprovedAih(_Publico, Base):
     n_aih: Mapped[str] = mapped_column(String(13), nullable=False)
     # VAL_TOT do RD: produção bruta aprovada; não é comprovante de recebimento.
     valor: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    # Recorte administrativo do RD para comparação com RJ; sem identificadores do paciente.
+    campos_publicos: Mapped[dict[str, Any] | None] = mapped_column(_JSON)
 
     __table_args__ = (
         UniqueConstraint("uf", "n_aih", "competencia", name="uq_sih_approved_aih"),

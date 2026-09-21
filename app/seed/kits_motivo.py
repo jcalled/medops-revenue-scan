@@ -32,16 +32,37 @@ FAIXAS = "Faixas de numeração de AIH autorizadas pela secretaria para o hospit
 CONTRATO = "Contrato com o gestor: metas, teto financeiro mensal e aditivos"
 CNS = "CNS do paciente conferido no cartão ou no CadSUS"
 
-REAPRESENTAR = "Confirmar com o gestor a reapresentação em até seis meses da alta, para AIH já apresentada e rejeitada ou bloqueada (art. 401, § 2º, PRC SAES/MS 1/2022)."
+REAPRESENTAR = (
+    "Reapresentar no SISAIH01 até o 6º mês contado do mês da alta (alta em janeiro: até junho), se a AIH foi "
+    "apresentada e rejeitada dentro dos quatro meses (MTO SIH jan/2017, item 4; Portaria SAES/MS 1.110/2021)."
+)
 NUNCA_INVENTAR = "Corrigir só o que o prontuário sustenta: nunca mudar o que foi feito no paciente para a conta passar."
+SEM_MUDAR_DATAS = (
+    "Não mudar data de internação nem de saída: AIH reapresentada com datas alteradas não é aceita "
+    "(MTO SIH jan/2017, item 58)."
+)
+
+# Fontes oficiais (DATASUS, http://sihd.datasus.gov.br/documentos/documentos_sihd2.php).
+MTO = "Manual Técnico Operacional do SIH, jan/2017 (MS/SAES)"
+FONTE_PRAZO = f"{MTO}, item 4; Portaria SAES/MS 1.110/2021, consolidada na PRC SAES/MS 1/2022."
+FONTE_CAPACIDADE = (f"{MTO}, item 59.1 (AIH rejeitada por capacidade é cancelada e não pode ser reapresentada); "
+                    "Nota explicativa CGSI/DRAC/SAS/MS de 31/10/2012 (cálculo da capacidade instalada).")
+FONTE_PROFISSIONAL = ("Orientações do SIHD2 sobre rejeição de profissionais (DATASUS) e Perguntas frequentes do SIHD2, "
+                      "item 18: o SIHD confere o CNES da competência; corrigido o cadastro, o gestor importa os "
+                      "profissionais de competências passadas e a AIH reapresentada pode ser aprovada.")
+FONTE_HABILITACAO = ("Perguntas frequentes do SIHD2 (DATASUS), item 17: a habilitação é conferida na competência da "
+                     "alta do paciente.")
+FONTE_SERVICO = ("Perguntas frequentes do SIHD2 (DATASUS), item 12: o serviço/classificação precisa ser hospitalar "
+                 "SUS, e próprio ou terceiro na AIH tem de bater com o CNES.")
+FONTE_BLOQUEIO = f"{MTO}, itens 57 e 58 (liberação de crítica e AIH bloqueadas para análise do gestor)."
 
 
 def _kit(codigo: str, titulo: str, significado: str, classe: str, onde: str, passos: list[str],
-         dados: list[str], evidencias: list[str], prevencao: str | None = None) -> dict[str, Any]:
+         dados: list[str], evidencias: list[str], prevencao: str | None = None, fonte: str = FONTE) -> dict[str, Any]:
     return {
         "codigo": codigo, "titulo": titulo, "significado": significado, "classe": classe, "onde_corrigir": onde,
         "passos": passos, "dados_do_hospital": dados, "evidencias": evidencias, "prevencao": prevencao,
-        "fonte": FONTE,
+        "fonte": fonte,
     }
 
 
@@ -70,20 +91,24 @@ def _profissional(codigo: str, titulo: str, significado: str, classe: str = "ALT
         [
             "Ler na AIH o CNS e o CBO do profissional que aparece como executante.",
             "Conferir no CNES da competência o vínculo desse profissional com o hospital, no CBO informado.",
-            "Se o vínculo existe e faltou no CNES, atualizar o CNES; se o CBO foi digitado errado, corrigir a AIH.",
+            "Se o CBO foi digitado errado na AIH, corrigir a AIH com o CBO do cadastro.",
+            "Se o vínculo existia e faltou no CNES daquela competência, corrigir o cadastro e pedir ao gestor que "
+            "importe no SIHD2 os profissionais de competências passadas antes de reapresentar.",
             "Nunca trocar por outro profissional que não executou: usar a escala e o prontuário.",
             REAPRESENTAR,
         ],
         [SISAIH, CNES_PROF, ESCALA],
         ["Espelho do CNES com o vínculo", "Escala do dia", "Registro do procedimento com o nome do executante"],
         "O FaturaSUS confere profissional e CBO no arquivo do hospital; o dado público não traz o profissional.",
+        FONTE_PROFISSIONAL,
     )
 
 
 def _conta(codigo: str, titulo: str, significado: str, conferir: str) -> dict[str, Any]:
     return _kit(
         codigo, titulo, significado, "ALTA", "SISAIH01",
-        [conferir, "Corrigir a quantidade ou o procedimento na AIH conforme o prontuário.", NUNCA_INVENTAR, REAPRESENTAR],
+        [conferir, "Corrigir a quantidade ou o procedimento na AIH conforme o prontuário.", SEM_MUDAR_DATAS,
+         NUNCA_INVENTAR, REAPRESENTAR],
         [SISAIH, PRONTUARIO],
         ["AIH antes e depois da correção", "Trecho do prontuário que sustenta a correção"],
         "O FaturaSUS confere quantidades e compatibilidades do SIGTAP antes do envio.",
@@ -108,33 +133,42 @@ def _sem_descricao(codigo: str, junto: str) -> dict[str, Any]:
 KITS: list[dict[str, Any]] = [
     _kit(
         "060082", "Diárias acima da capacidade instalada",
-        "O SIH soma as diárias das AIH do hospital na competência e compara com o que os leitos SUS do CNES "
-        "comportam (leitos × dias). As AIH que passam do limite são rejeitadas.",
-        "INCERTA", "CNES",
+        "Na produção do mês, o SIHD soma as diárias das AIH (da internação à saída) e compara com os leitos SUS do "
+        "CNES × dias do mês, sem UTI e UI, que têm conta própria. O excedente é rejeitado. Pela regra do MS, a AIH "
+        "rejeitada por capacidade é cancelada e não pode ser reapresentada: não há como corrigir os leitos do CNES "
+        "de competências passadas.",
+        "NAO_REAPRESENTAVEL", "NENHUM",
         [
-            "Comparar os leitos SUS do CNES na competência com os leitos realmente em funcionamento.",
-            "Se há leito SUS funcionando fora do CNES, atualizar o CNES antes de reapresentar.",
-            "Conferir no censo diário se as diárias informadas batem com a ocupação; corrigir diárias lançadas a mais.",
-            "Pedir à secretaria o relatório de capacidade do SIHD: quanto sobrou em cada mês.",
-            "Reapresentar as AIH em competência com folga de capacidade, dentro da janela de seis meses para reapresentação, confirmada com o gestor.",
+            "Não reapresentar: a regra do MS cancela a AIH rejeitada por capacidade.",
+            "Contrato de gestão: usar o relatório de AIH rejeitadas do SIH para contar essas internações nas metas "
+            "físicas do Plano Operativo, como o manual permite.",
+            "Prevenir nos próximos meses: conferir leitos SUS em funcionamento contra o CNES e cadastrar só leito real.",
+            "Hospital público com urgência 24h, referência com emergência ou maternidade de alto risco: avaliar com o "
+            "gestor o cadastro de leitos reversíveis (Portaria SAS/MS 312/2002).",
+            "Regular as vagas com o gestor e acompanhar a ocupação do mês antes de fechar o lote.",
         ],
-        [LEITOS, CENSO, SISAIH, CRITICAS],
-        ["Espelho do CNES antes e depois", "Censo diário do mês", "Mês em que cada AIH foi reapresentada"],
+        [LEITOS, CENSO, CRITICAS, CONTRATO],
+        ["Relatório de AIH rejeitadas por capacidade", "Censo diário do mês", "Metas físicas do Plano Operativo"],
         "O FaturaSUS soma as diárias do lote e avisa quando passam da capacidade antes do envio.",
+        FONTE_CAPACIDADE,
     ),
     _kit(
         "060084", "Diárias de UTI acima da capacidade instalada",
-        "As diárias de UTI da competência passaram do que os leitos de UTI SUS do CNES comportam.",
-        "INCERTA", "CNES",
+        "As diárias de UTI do mês passaram dos leitos de UTI habilitados no CNES × dias do mês (a UTI tem conta "
+        "própria, por tipo de leito habilitado). Pela regra do MS, a AIH rejeitada por capacidade é cancelada e não "
+        "pode ser reapresentada.",
+        "NAO_REAPRESENTAVEL", "NENHUM",
         [
-            "Conferir leitos de UTI SUS cadastrados, habilitados e em funcionamento na competência.",
-            "Conferir no censo de UTI se as diárias informadas batem com a ocupação.",
-            "Atualizar o CNES se há leito de UTI habilitado funcionando fora do cadastro.",
-            "Reapresentar em competência com folga de capacidade de UTI, dentro da janela de seis meses para reapresentação, confirmada com o gestor.",
+            "Não reapresentar: a regra do MS cancela a AIH rejeitada por capacidade.",
+            "Contrato de gestão: contar essas internações nas metas físicas do Plano Operativo.",
+            "Prevenir: conferir leitos de UTI habilitados e em funcionamento contra o CNES.",
+            "Em internação longa de UTI, o manual permite encerrar a AIH e emitir nova, de comum acordo com o gestor, "
+            "para apresentar no mês as diárias já usadas.",
         ],
-        [LEITOS, CENSO, HABILITACOES, SISAIH, CRITICAS],
-        ["Espelho do CNES", "Censo de UTI", "Portaria de habilitação dos leitos de UTI"],
+        [LEITOS, CENSO, HABILITACOES, CRITICAS, CONTRATO],
+        ["Relatório de AIH rejeitadas por capacidade", "Censo de UTI", "Portaria de habilitação dos leitos de UTI"],
         "O FaturaSUS confere diárias de UTI contra os leitos antes do envio.",
+        FONTE_CAPACIDADE,
     ),
     _kit(
         "010003", "Número da AIH fora da faixa",
@@ -155,18 +189,20 @@ KITS: list[dict[str, Any]] = [
     _sem_descricao("060221", "habilitação e leito"),
     _kit(
         "060120", "Procedimento exige habilitação",
-        "O procedimento realizado pede, no SIGTAP, uma habilitação que o hospital não tem no CNES da competência.",
+        "O procedimento realizado pede, no SIGTAP, uma habilitação que o hospital não tinha no CNES. O SIHD confere "
+        "a habilitação da competência da ALTA do paciente: habilitação obtida depois não recupera a AIH.",
         "MEDIA", "CNES",
         [
             "Ver no SIGTAP qual habilitação o procedimento exige.",
-            "Conferir se o hospital tem essa habilitação em portaria vigente na competência da AIH.",
-            "Se tem portaria e faltou no CNES, atualizar o CNES e reapresentar.",
-            "Se não tem habilitação, não reapresentar: tratar o pedido com a secretaria ou deixar de cobrar o "
-            "procedimento por este estabelecimento.",
+            "Conferir se a portaria de habilitação já valia no mês da alta do paciente.",
+            "Se valia e faltou no CNES daquela competência, regularizar o cadastro com o gestor e reapresentar.",
+            "Se não valia no mês da alta, não reapresentar: a AIH não volta; tratar a habilitação para os próximos meses.",
+            REAPRESENTAR,
         ],
         [HABILITACOES, "CNES local: habilitações", SISAIH],
-        ["Portaria de habilitação", "Espelho do CNES com a habilitação"],
+        ["Portaria de habilitação com a vigência", "Espelho do CNES com a habilitação"],
         "O FaturaSUS confere a habilitação exigida pelo procedimento antes do envio.",
+        FONTE_HABILITACAO,
     ),
     _profissional(
         "060109", "Profissional sem vínculo no CNES com o CBO informado",
@@ -174,17 +210,21 @@ KITS: list[dict[str, Any]] = [
     ),
     _kit(
         "060072", "Hospital sem o serviço ou a classificação exigidos",
-        "O procedimento pede um serviço/classificação do CNES que o hospital não tem cadastrado na competência.",
+        "O procedimento pede um serviço/classificação que o CNES do hospital não tem como HOSPITALAR SUS, ou a AIH "
+        "informou executor próprio quando o CNES tem o serviço como terceiro (ou o contrário).",
         "MEDIA", "CNES",
         [
-            "Ver no SIGTAP o serviço e a classificação que o procedimento exige.",
-            "Conferir se o hospital presta o serviço e se ele está no CNES da competência.",
-            "Se presta e faltou no cadastro, atualizar o CNES e reapresentar.",
-            "Se não presta, não reapresentar.",
+            "Ver no SIGTAP (aba Serviço/Classificação) o que o procedimento exige.",
+            "No espelho da AIH, ver qual CNES foi informado como executor: em branco é o próprio hospital.",
+            "Se o CNES tem o serviço como terceiro e a AIH disse próprio (ou o contrário), corrigir o executor na AIH.",
+            "Se o serviço está só como ambulatorial, marcar como hospitalar SUS no CNES e reapresentar.",
+            "Se o hospital não presta o serviço, não reapresentar.",
+            REAPRESENTAR,
         ],
         ["CNES local: serviços e classificações", SISAIH],
-        ["Espelho do CNES com o serviço"],
+        ["Espelho do CNES com o serviço hospitalar SUS", "Espelho da AIH com o executor"],
         "O FaturaSUS confere serviço e classificação do CNES antes do envio.",
+        FONTE_SERVICO,
     ),
     _leito("060022", "UTI II neonatal"),
     _kit(
@@ -215,19 +255,22 @@ KITS: list[dict[str, Any]] = [
     ),
     _kit(
         "020081", "Internações sobrepostas do mesmo paciente",
-        "O mesmo paciente (CNS) aparece internado em períodos que se sobrepõem, nesta ou em outra AIH, às vezes "
-        "de outro hospital.",
-        "ALTA", "SISAIH01",
+        "O mesmo paciente (CNS) aparece em internações sobrepostas, ou com entrada até 3 dias depois da saída "
+        "anterior, no mesmo ou em outro hospital. O SIHD bloqueia e só o gestor libera.",
+        "MEDIA", "SESA",
         [
             "Localizar a outra AIH do mesmo CNS com a secretaria.",
-            "Conferir no prontuário as datas de internação e alta e o CNS do paciente.",
-            "Se foi erro de data ou de CNS, corrigir e reapresentar.",
-            "Se foi transferência ou reinternação, lançar conforme a regra e documentar.",
+            "Se o CNS foi digitado errado, corrigir o CNS e reapresentar.",
+            "Se foi transferência, reinternação ou nova AIH na mesma internação, documentar e pedir a análise do gestor.",
+            SEM_MUDAR_DATAS,
+            "Reapresentar depois da recomendação do gestor: a AIH volta marcada como bloqueada em processamento "
+            "anterior, para nova análise.",
             NUNCA_INVENTAR,
         ],
         [SISAIH, PRONTUARIO, CNS, CRITICAS],
-        ["Cópia do cartão/CadSUS", "Folha de admissão e alta"],
+        ["Cópia do cartão/CadSUS", "Folha de admissão, alta e transferência"],
         "O FaturaSUS confere CNS e datas do paciente no arquivo do hospital.",
+        FONTE_BLOQUEIO,
     ),
     _conta(
         "060017", "Quantidade acima da permitida",
@@ -235,16 +278,19 @@ KITS: list[dict[str, Any]] = [
         "Conferir no SIGTAP a quantidade máxima e no prontuário quantas vezes o procedimento foi feito.",
     ),
     _kit(
-        "040008", "Rejeição por prazo: conferir histórico",
-        "A apresentação foi rejeitada por prazo. Conferir se há apresentação anterior e enquadramento na janela de reapresentação.",
-        "INVESTIGAR", "SESA",
+        "040008", "Apresentada depois do prazo: perda definitiva",
+        "A AIH foi apresentada a partir do quarto mês da alta. Pela regra do MS, é rejeitada em definitivo: a alta "
+        "de janeiro só pode ser apresentada em janeiro, fevereiro, março ou abril.",
+        "PRAZO_VENCIDO", "NENHUM",
         [
-            "Conferir apresentação inicial (quatro meses) e reapresentação (seis meses desde a alta), conforme o histórico e o gestor.",
-            "Registrar por que atrasou (auditoria, documento, sistema) para não repetir.",
+            "Não reapresentar: a regra do MS rejeita em definitivo a AIH apresentada depois do quarto mês da alta.",
+            "Registrar por que atrasou (auditoria, documento, sistema, faixa de AIH) para não repetir.",
+            "Controlar o prazo de cada AIH antes de fechar o lote.",
         ],
         [SISAIH],
         [],
         "O FaturaSUS avisa quando o prazo de apresentação está vencendo.",
+        FONTE_PRAZO,
     ),
     _sem_descricao("060216", "leito, profissional e prazo"),
     _leito("060028", "UTI II adulto"),
@@ -340,6 +386,8 @@ KITS: list[dict[str, Any]] = [
         ],
         ["Contratos com terceiros (laboratório, imagem, hemodinâmica)", SISAIH],
         ["Espelho do CNES do terceiro"],
+        None,
+        FONTE_SERVICO,
     ),
     _conta(
         "060149", "Diárias acima dos dias do mês",

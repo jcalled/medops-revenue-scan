@@ -28,6 +28,32 @@ router = APIRouter(prefix="/api/revenue-scan", tags=["prova"])
 _CNES = re.compile(r"^\d{1,7}$")
 
 
+@router.get("/hospitals/{cnes}/aih/{n_aih}/plano-correcao")
+def plano_da_aih(cnes: str, n_aih: str,
+                 referencia: str | None = Query(default=None, pattern=r"^\d{4}(0[1-9]|1[0-2])$"),
+                 acesso: Acesso = Depends(require_revenue_scan), db: Session = Depends(get_db)) -> dict[str, Any]:
+    from app.domain.plano_correcao import montar_plano
+    from app.domain.kit import referencia_padrao
+
+    historico = historia_da_aih(cnes=cnes, n_aih=n_aih, acesso=acesso, db=db)
+    return montar_plano(historico, referencia or referencia_padrao())
+
+
+@router.get("/hospitals/{cnes}/aih/{n_aih}/historico-publico")
+def historia_da_aih(cnes: str, n_aih: str, acesso: Acesso = Depends(require_revenue_scan), db: Session = Depends(get_db)) -> dict[str, Any]:
+    from app.domain.historico_publico import historico_publico
+
+    if not _CNES.fullmatch(cnes) or len(n_aih) > 13 or not _hospital_no_escopo(db, acesso, cnes.zfill(7)):
+        raise HTTPException(status_code=404, detail="AIH não encontrada no escopo")
+    numero = cnes.zfill(7)
+    _, _, limite = _escopo(acesso)
+    score = _ultimos_scores(db, [numero], limite).get(numero)
+    corpo = historico_publico(db, numero, n_aih, competencias_entre(score.periodo_inicio, score.periodo_fim)) if score else None
+    if corpo is None:
+        raise HTTPException(status_code=404, detail="AIH não encontrada no período do contrato")
+    return corpo
+
+
 @router.get("/hospitals/{cnes}/evidencias")
 def evidencias_publicas(
     cnes: str,

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.domain.kit import CLASSES, RECUPERAVEIS, classificar
 from app.adapters.evidence_archive import caminho_preservado
-from app.domain.recuperacao import FONTE_PRAZO
+from app.domain.recuperacao import FONTE_PRAZO, PRAZO_MESES
 from app.domain.prova import soma
 from app.models import DataLoad, Establishment
 
@@ -50,13 +50,16 @@ def dossie(db: Session, prova: dict[str, Any], referencia: str) -> dict[str, Any
         "potencial_no_prazo": soma(potenciais),
         "aprovacao_localizada": soma(grupos["JA_RECEBIDA"]),
         "fora_janela": soma(grupos["PRAZO_VENCIDO"]),
+        # Capacidade: a regra do MS cancela a AIH (MTO SIH jan/2017, item 59.1).
+        "nao_reapresentavel": soma(grupos["NAO_REAPRESENTAVEL"]),
         "a_validar": soma(grupos["INVESTIGAR"] + grupos["GESTOR"]),
         "classes": {c: soma(grupos[c]) for c in CLASSES},
         "prevencao": prova["prevencao"],
         "cobertura": {"uf": uf, "ultimo_rd": rd[-1] if rd else None,
                       "cargas_ausentes": faltantes, "arquivos": list(manifestos.values())},
-        "prazo": {"meses": 6, "fonte": FONTE_PRAZO, "artigo": "Art. 401, § 2º",
-                  "leitura": "Janela estimada para reapresentação de AIH já apresentada e rejeitada ou bloqueada. Contada da alta; confirmar calendário e enquadramento com o gestor. Apresentação inicial: regra distinta de quatro meses."},
+        "prazo": {"meses": PRAZO_MESES, "fonte": FONTE_PRAZO,
+                  "artigo": "MTO SIH jan/2017, item 4; Portaria SAES/MS 1.110/2021",
+                  "leitura": "AIH apresentada e rejeitada dentro dos quatro meses pode ser reapresentada até o 6º mês contado do mês da alta (alta em janeiro: até junho). Apresentação inicial: até o 4º mês, contando o da alta. Confirmar calendário com o gestor."},
         "limites": [
             "Os valores são os das rejeições, contadas uma vez por AIH pela última rejeição no período. Os cartões de situação repartem esse total; prevenção se sobrepõe a ele e não deve ser somada.",
             "Potencial no prazo é uma triagem por motivo e data, não crédito reconhecido: depende de prontuário, autorizações, regras da competência e validação do faturamento.",

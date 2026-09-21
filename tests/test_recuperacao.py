@@ -79,7 +79,8 @@ def test_marca_base_e_nova_e_confere_recuperadas(app_com_nucleo, fabrica_sessao)
         == ("BASE", "RECUPERADA", "202607", 1100.0)
     assert (itens["2"]["origem"], itens["2"]["situacao"]) == ("BASE", "EM_ABERTO")
     assert (itens["5"]["origem"], itens["5"]["situacao"], itens["5"]["valor_aprovado"]) == ("NOVA", "RECUPERADA", 480.0)
-    assert (itens["6"]["origem"], itens["6"]["prazo_estimado"], itens["6"]["prazo"]) == ("NOVA", "202609", None)
+    # Alta em março: reapresentação até agosto; com julho carregado, agosto é o próximo processamento.
+    assert (itens["6"]["origem"], itens["6"]["prazo_estimado"], itens["6"]["prazo"]) == ("NOVA", "202608", "VENCENDO")
     assert itens["2"]["motivos"] == [{"codigo": "060082", "descricao": "QUANTIDADE DE DIÁRIAS SUPERIOR A CAPACIDADE INSTALADA"}]
     assert [i["situacao"] for i in detalhe["itens"]][:2] == ["EM_ABERTO", "EM_ABERTO"]
 

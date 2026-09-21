@@ -39,13 +39,15 @@ from app.models import (
 )
 
 # Da mais fácil para a mais difícil de receber.
-DIFICULDADE = ("ALTA", "MEDIA", "INCERTA", "INVESTIGAR", "GESTOR", "PRAZO_VENCIDO", "JA_RECEBIDA")
+DIFICULDADE = ("ALTA", "MEDIA", "INCERTA", "INVESTIGAR", "GESTOR", "NAO_REAPRESENTAVEL", "PRAZO_VENCIDO", "JA_RECEBIDA")
 
+# Capacidade e prazo seguem a regra do MS (MTO SIH jan/2017, itens 4 e 59.1): a AIH
+# rejeitada por capacidade é cancelada; a apresentada depois do 4º mês da alta, definitiva.
 CLASSE_POR_CATEGORIA = {
     "PROFISSIONAL": "ALTA", "PACIENTE": "ALTA", "REGRAS_SIGTAP": "ALTA",
     "LEITO_CNES": "MEDIA", "HABILITACAO_SERVICO": "MEDIA",
-    "CAPACIDADE": "INCERTA",
-    "PRAZO": "INVESTIGAR",
+    "CAPACIDADE": "NAO_REAPRESENTAVEL",
+    "PRAZO": "PRAZO_VENCIDO",
     "ADMINISTRATIVO": "GESTOR",
     "OUTROS": "INVESTIGAR",
 }

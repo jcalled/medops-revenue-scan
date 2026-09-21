@@ -62,7 +62,7 @@ def test_kit_confirmado_muda_a_classificacao(app_com_nucleo, fabrica_sessao):
     kit = _get(http, url)
     depois = {i["n_aih"]: i for i in kit["itens"]}
     assert depois["G1"]["classe"] == "MEDIA" and depois["G1"]["classe_pelo_kit"]
-    assert depois["G1"]["meses_para_vencer"] == 3
+    assert depois["G1"]["meses_para_vencer"] == 2  # alta em junho: reapresenta até novembro
     # 060109 confirmado junto de um motivo sem kit (vai para investigar): vale o mais difícil.
     assert depois["M1"]["classe"] == "INVESTIGAR"
     assert depois["P1"]["classe"] == "ALTA"
@@ -123,7 +123,8 @@ def test_situacao_da_aih(app_com_nucleo, fabrica_sessao):
     kit = _get(http, "/api/revenue-scan/kit?uf=CE&referencia=202609")
     p1 = next(i for i in kit["itens"] if i["n_aih"] == "P1")
     assert p1["tratativa"]["situacao"] == "REAPRESENTADA" and p1["tratativa"]["competencia_reapresentacao"] == "202609"
-    assert kit["tratativas"] == {"REAPRESENTADA": 1, "SEM_SITUACAO": 34}
+    # Para trabalhar: P1, H1, B1, S1, O1, G1 — capacidade saiu da lista (não reapresentável).
+    assert kit["tratativas"] == {"REAPRESENTADA": 1, "SEM_SITUACAO": 5}
 
 
 def test_situacao_fora_do_escopo(app_com_nucleo, fabrica_sessao):

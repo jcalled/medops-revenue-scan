@@ -175,7 +175,13 @@ def carregar_competencia(db: Session, uf: str, competencia: str, adapters: dict[
              **{k: (round(v, 2) if isinstance(v, float) else v) for k, v in p.items()}}
             for (cnes, proc, complexidade), p in por_procedimento.items()
         ])
-        _inserir(db, SihApprovedAih, [{**base, "cnes": l["cnes"], "n_aih": l["n_aih"], "valor": l["valor"]}
+        _inserir(db, SihApprovedAih, [{**base, "cnes": l["cnes"], "n_aih": l["n_aih"], "valor": l["valor"],
+                                     "campos_publicos": {
+                                         "procedimento": l.get("proc_realizado"),
+                                         "competencia_aih": l.get("competencia_aih"),
+                                         "dt_internacao": l["dt_internacao"].isoformat() if l.get("dt_internacao") else None,
+                                         "dt_saida": l["dt_saida"].isoformat() if l.get("dt_saida") else None,
+                                     }}
                                      for l in aprovadas.values()])
         _inserir(db, SihRejection, [
             {**base, "cnes": l["cnes"], "n_aih": l["n_aih"], "competencia_aih": l["competencia_aih"],

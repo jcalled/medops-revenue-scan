@@ -5,7 +5,10 @@ das AIH rejeitadas, e a lista de trabalho do faturamento.
 Cada AIH rejeitada (a última rejeição dela no período) cai numa classe:
 
 - JA_RECEBIDA: voltou aprovada em algum processamento — aprovação registrada, sem comprovação de recebimento;
-- PRAZO_VENCIDO: fora da janela estimada de seis meses após a alta para reapresentação;
+- NAO_REAPRESENTAVEL: rejeitada por capacidade instalada — pela regra do MS a AIH
+  é cancelada e não pode ser reapresentada (MTO SIH jan/2017, item 59.1);
+- PRAZO_VENCIDO: apresentada depois do 4º mês da alta (040008, definitiva) ou fora
+  da janela de reapresentação, que vai até o 6º mês contado do mês da alta;
 - GESTOR: teto, faixa, bloqueio da secretaria — negociação, não correção;
 - INVESTIGAR: motivo sem regra (060221, por exemplo) ou AIH sem data de alta;
 - ALTA, MEDIA, INCERTA: recuperável dentro do prazo, pela chance de a correção
@@ -44,8 +47,39 @@ CLASSES = {
     "INCERTA": "Recuperável · chance incerta",
     "INVESTIGAR": "A investigar",
     "GESTOR": "Bloqueio do gestor",
-    "PRAZO_VENCIDO": "Fora da janela estimada de reapresentação",
+    "NAO_REAPRESENTAVEL": "Não reapresentável pela regra do MS",
+    "PRAZO_VENCIDO": "Não dá mais: prazo",
     "JA_RECEBIDA": "Aprovação localizada no RD",
+}
+CAPACIDADE_CODIGOS = frozenset({"060082", "060083", "060084"})
+_MANUAIS = "http://sihd.datasus.gov.br/documentos/documentos_sihd2.php"
+# O que foi perdido e não volta, com a regra e onde ela está escrita.
+PERDAS = {
+    "CAPACIDADE": {
+        "titulo": "Rejeitada por capacidade instalada: AIH cancelada",
+        "regra": "A AIH rejeitada por quantidade de diárias superior à capacidade instalada é cancelada e não pode "
+                 "ser reapresentada, porque não há como corrigir os leitos do CNES em competências anteriores.",
+        "fonte": "Manual Técnico Operacional do SIH, jan/2017, item 59.1; Nota explicativa CGSI/MS de 31/10/2012.",
+        "url": _MANUAIS,
+        "o_que_fazer": "Contar essas internações nas metas físicas do contrato de gestão (Plano Operativo), como o "
+                       "manual permite, e prevenir: leitos SUS em funcionamento no CNES, leitos reversíveis onde a "
+                       "regra deixa, regulação de vagas e acompanhamento da ocupação antes de fechar o lote.",
+    },
+    "PRAZO_APRESENTACAO": {
+        "titulo": "Apresentada depois do 4º mês da alta (040008)",
+        "regra": "A AIH apresentada a partir do quarto mês da alta é rejeitada em definitivo.",
+        "fonte": "Manual Técnico Operacional do SIH, jan/2017, item 4; Portaria SAES/MS 1.110/2021.",
+        "url": "https://bvsms.saude.gov.br/bvs/saudelegis/saes/2021/prt1110_18_11_2021.html",
+        "o_que_fazer": "Controlar o prazo de cada AIH antes de fechar o lote; o FaturaSUS avisa o prazo vencendo.",
+    },
+    "JANELA_REAPRESENTACAO": {
+        "titulo": "Janela de reapresentação encerrada",
+        "regra": "A AIH apresentada e rejeitada dentro dos quatro meses pode ser reapresentada até o 6º mês contado "
+                 "do mês da alta (alta em janeiro: até junho). Depois disso não volta.",
+        "fonte": "Manual Técnico Operacional do SIH, jan/2017, item 4; Portaria SAES/MS 1.110/2021.",
+        "url": "https://bvsms.saude.gov.br/bvs/saudelegis/saes/2021/prt1110_18_11_2021.html",
+        "o_que_fazer": "Trabalhar primeiro o que vence no mês: a lista do kit já vem nessa ordem.",
+    },
 }
 RECUPERAVEIS = ("ALTA", "MEDIA", "INCERTA")
 NA_LISTA_DE_TRABALHO = RECUPERAVEIS + ("INVESTIGAR", "GESTOR")
@@ -57,8 +91,8 @@ ONDE_CORRIGIR = {
     "REGRAS_SIGTAP": "SISAIH01: procedimento, quantidade e compatibilidades, conforme o prontuário",
     "LEITO_CNES": "CNES: leitos de UTI/UCI e habilitação — só se o leito existe",
     "HABILITACAO_SERVICO": "CNES: habilitação ou serviço/classificação — só se o hospital tem de fato",
-    "CAPACIDADE": "CNES (leitos SUS em funcionamento) e SESA (regra de capacidade); reapresentar em mês com folga",
-    "PRAZO": "Confirmar apresentação anterior, data de alta e janela de reapresentação com o gestor",
+    "CAPACIDADE": "Não reapresentar (regra do MS): contar nas metas do contrato de gestão e prevenir nos próximos meses",
+    "PRAZO": "Não reapresentar (regra do MS): controlar o prazo antes do envio",
     "ADMINISTRATIVO": "SESA: teto, faixa de numeração ou bloqueio",
     "OUTROS": "SESA: confirmar o que o motivo significa",
 }
@@ -86,22 +120,34 @@ def classificar(linha: dict[str, Any], referencia: str,
                 confirmados: dict[str, str] | None = None) -> tuple[str, str | None]:
     if linha["situacao"] == "JA_RECEBIDA":
         return "JA_RECEBIDA", None
-    # Kit confirmado de algum motivo manda; sem ele, vale o tipo de rejeição.
     codigos = [m["codigo"] for m in linha.get("motivos", [])]
+    prazo = prazo_estimado(date.fromisoformat(linha["dt_saida"])) if linha.get("dt_saida") else None
+    # Regras do MS antes de qualquer kit: capacidade cancela a AIH; apresentação depois do 4º mês é definitiva.
+    if CAPACIDADE_CODIGOS.intersection(codigos) or linha["categoria"] == "CAPACIDADE":
+        return "NAO_REAPRESENTAVEL", prazo
+    if linha["categoria"] == "PRAZO":
+        return "PRAZO_VENCIDO", prazo
+    # Kit confirmado de algum motivo manda; sem ele, vale o tipo de rejeição.
     classe = (classe_pelos_kits(codigos, confirmados or {})
               or CLASSE_POR_CATEGORIA.get(linha["categoria"], "INVESTIGAR"))
     if classe == "JA_RECEBIDA":
         # Um manual de motivo não substitui a aprovação efetivamente localizada no RD.
         classe = "INVESTIGAR"
-    if linha["categoria"] == "PRAZO":
-        classe = "INVESTIGAR"  # Rever também kits antigos que usavam quatro meses.
-    prazo = prazo_estimado(date.fromisoformat(linha["dt_saida"])) if linha.get("dt_saida") else None
-    if classe in RECUPERAVEIS or linha["categoria"] == "PRAZO":
+    if classe in RECUPERAVEIS:
         if prazo is None:
             return "INVESTIGAR", None
         if prazo < referencia:
             return "PRAZO_VENCIDO", prazo
     return classe, prazo
+
+
+def perda(linha: dict[str, Any], classe: str) -> str | None:
+    """Por que a AIH não volta mais: a chave de PERDAS, com a regra e a fonte."""
+    if classe == "NAO_REAPRESENTAVEL":
+        return "CAPACIDADE"
+    if classe == "PRAZO_VENCIDO":
+        return "PRAZO_APRESENTACAO" if linha["categoria"] == "PRAZO" else "JANELA_REAPRESENTACAO"
+    return None
 
 
 def recupera_sozinho(db: Session, ufs: list[str], meses: list[str]) -> dict[str, dict[str, Any]]:
@@ -172,11 +218,15 @@ def montar_kit(db: Session, cnes: list[str], meses: list[str], ufs: list[str], r
     hospitais: dict[str, dict[str, Any]] = {}
     vencimento: dict[str, dict[str, dict[str, float]]] = defaultdict(lambda: {c: _soma() for c in RECUPERAVEIS})
     piso = 0.0
+    perdas: dict[str, dict[str, float]] = defaultdict(_soma)
     itens = []
     for l in linhas:
         classe, prazo = classificar(l, referencia, confirmados)
         valor = l["valor"]
         _somar(classes[classe], valor)
+        motivo_perda = perda(l, classe)
+        if motivo_perda:
+            _somar(perdas[motivo_perda], valor)
         h = hospitais.setdefault(l["cnes"], {"cnes": l["cnes"], "nome": nomes.get(l["cnes"]), "total": _soma(),
                                              "classes": {c: _soma() for c in CLASSES}})
         _somar(h["total"], valor)
@@ -197,6 +247,7 @@ def montar_kit(db: Session, cnes: list[str], meses: list[str], ufs: list[str], r
                 "acao": POR_CODIGO[l["categoria"]].acao if l["categoria"] in POR_CODIGO else None,
                 "por_que_a_chance": POR_QUE_A_CHANCE.get(classe),
                 "classe_pelo_kit": classe_pelos_kits([m["codigo"] for m in l["motivos"]], confirmados) is not None,
+                "perda": motivo_perda,
             })
 
     # Ordem de trabalho: o que vence antes, a chance maior, o valor maior; investigar e gestor no fim, por valor.
@@ -239,6 +290,8 @@ def montar_kit(db: Session, cnes: list[str], meses: list[str], ufs: list[str], r
             for mes, por_classe in sorted(vencimento.items())
         ],
         "recupera_sozinho": sozinho,
+        "perdas": [{"codigo": c, **PERDAS[c], **_fechar(v, total)}
+                   for c, v in sorted(perdas.items(), key=lambda kv: -kv[1]["valor"])],
         "kits_motivo": kits_usados(db, {m["codigo"] for l in linhas for m in l["motivos"]}, ufs),
         "tratativas": dict(situacoes),
         "itens": itens[:limite],

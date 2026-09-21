@@ -1,0 +1,51 @@
+{
+  "glosa_ai": [
+    "app/fatursus/correcoes/__init__.py",
+    "app/fatursus/correcoes/documento.py",
+    "app/fatursus/features/feature_sus_datas.py",
+    "app/fatursus/features/feature_sus_opm.py",
+    "app/fatursus/features/feature_sus_sigtap.py",
+    "app/fatursus/loaders/fatursus_context_builder.py",
+    "app/fatursus/loaders/sigtap_loader.py",
+    "app/fatursus/parser/sisaih_parser.py",
+    "app/fatursus/pipeline/fatursus_pipeline.py",
+    "app/fatursus/service.py",
+    "app/fatursus/sigtap_evidencia.py",
+    "app/fatursus/sugestao_sigtap.py",
+    "app/main.py",
+    "app/routes/fatursus/correcoes.py",
+    "app/routes/fatursus/pre_submission.py",
+    "app/services/reference/importers.py",
+    "app/services/reference/lazy.py",
+    "deploy/docker-compose.revenue-scan.yml",
+    "scripts/cron/atualiza_referencias.py",
+    "tests/fatursus/test_correcao_documento.py",
+    "tests/fatursus/test_correcao_fluxo.py",
+    "tests/fatursus/test_prontidao_sigtap.py",
+    "tests/fatursus/test_sigtap_evidencia.py"
+  ],
+  "glosaai-frontend": [
+    "public/formatos/medops-aih-v1.txt",
+    "src/app/(app)/_components/fatursus/CorrecaoSus.tsx",
+    "src/app/(app)/glosaai/sus/page.tsx",
+    "src/app/(app)/revenue-scan/_components/Evidencias.tsx",
+    "src/app/(app)/revenue-scan/_components/HistoricoPublico.tsx",
+    "src/app/(app)/revenue-scan/_components/PlanoCorrecao.tsx",
+    "src/app/(app)/revenue-scan/correcao/page.tsx"
+  ],
+  "medops-revenue-scan": [
+    "IMPLEMENTACAO_SUS_2026-09-16.md",
+    "REVISAO_2026-09-15.md",
+    "alembic/versions/0010_evidencia_rd.py",
+    "app/api/routes/prova.py",
+    "app/domain/historico_publico.py",
+    "app/domain/plano_correcao.py",
+    "app/domain/regras_correcao_ampliadas.py",
+    "app/jobs/carga_sih.py",
+    "app/models.py",
+    "docs/sigtap-evidencia-2026-09-16.md",
+    "docs/validacao-sisaih01.md",
+    "tests/test_evidencias.py",
+    "tests/test_plano_correcao.py"
+  ]
+}

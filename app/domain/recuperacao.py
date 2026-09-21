@@ -29,10 +29,13 @@ from app.models import (
 
 ABERTA, RECUPERADA = "EM_ABERTO", "RECUPERADA"
 ATIVO, ENCERRADO = "ATIVO", "ENCERRADO"
-# Reapresentação de AIH já apresentada/rejeitada: art. 401, § 2º.
-# Apresentação inicial tem regra distinta (quatro meses); não usar esta função para ela.
-PRAZO_MESES = 6
-FONTE_PRAZO = "https://bvsms.saude.gov.br/bvs/saudelegis/saes/2022/prc0001_31_03_2022.html"
+# Reapresentação de AIH apresentada e rejeitada dentro dos quatro meses: até o 6º mês
+# contado do mês da alta, inclusive (alta em janeiro: apresenta até abril, reapresenta
+# em maio ou junho) — MTO SIH jan/2017, item 4; Portaria SAES/MS 1.110/2021, consolidada
+# na PRC SAES/MS 1/2022. O último mês é alta + 5. A apresentação inicial vai até alta + 3.
+PRAZO_MESES = 5
+PRAZO_APRESENTACAO_MESES = 3
+FONTE_PRAZO = "https://bvsms.saude.gov.br/bvs/saudelegis/saes/2021/prt1110_18_11_2021.html"
 
 RESSALVA_FATURA = (
     "Simulação comercial sobre produção aprovada: não comprova recebimento nem atribuição à MedOps. "
@@ -51,7 +54,7 @@ def mais_meses(aaaamm: str, n: int) -> str:
 
 
 def prazo_estimado(dt_saida: date | None) -> str | None:
-    """Último mês de processamento em que a AIH ainda cabe: seis meses depois da alta para reapresentação. Confirmar calendário do gestor."""
+    """Último mês em que a AIH rejeitada ainda pode ser reapresentada: o 6º contado do mês da alta. Confirmar calendário do gestor."""
     return mais_meses(f"{dt_saida.year}{dt_saida.month:02d}", PRAZO_MESES) if dt_saida else None
 
 
