@@ -214,3 +214,24 @@ def test_com_e_sem_o_software_e_semelhantes(app_com_nucleo, fabrica_sessao):
     assert capacidade["categoria"] == "CAPACIDADE" and capacidade["n_semelhantes"] == 8
     assert capacidade["taxa_semelhantes"] == 0.0 and capacidade["vezes"] is None   # os semelhantes não perdem
     assert capacidade["excesso_mes"] == 146000.0
+
+
+def test_oficio_para_a_secretaria(app_com_nucleo, fabrica_sessao):
+    from app.models import SiaApacMonth, SihErrorCode
+
+    _dados(fabrica_sessao)
+    with fabrica_sessao() as db:
+        # Tabela oficial dos motivos: 999999 não está nela; os demais estão descritos.
+        for codigo in ("060109", "060120", "060082", "010003", "040008"):
+            db.add(SihErrorCode(codigo=codigo, descricao=f"Motivo {codigo}"))
+        db.add(SiaApacMonth(uf="CE", competencia="202606", cnes=HRVJ, linhas=1, valor_produzido=900, valor_aprovado=100,
+                            valor_nao_aprovado=800, valor_teto=800, ocorrencias={}, procedimentos=[{"procedimento": "0304050024", "valor": 800.0}]))
+        db.commit()
+    http, _ = app_com_nucleo(lambda r: httpx.Response(200, json=contrato()))
+    oficio = _get(http, f"/api/revenue-scan/recovery-report/letter?cnes={HRVJ},{HRC}")
+    [hrvj] = [h for h in oficio["hospitais"] if h["cnes"] == HRVJ]
+    assert hrvj["uf"] == "CE"
+    assert [(p["procedimento"], p["aih"], p["valor"], p["motivos"]) for p in hrvj["habilitacao"]] == [("—", 1, 2000.0, ["060120"])]
+    assert [s["codigo"] for s in hrvj["sem_descricao"]] == ["999999"]                    # motivo fora da tabela oficial
+    assert hrvj["apac"]["teto"] == 800.0 and hrvj["apac"]["procedimentos"][0]["procedimento"] == "0304050024"
+    assert all(h["cnes"] != HRC or not h["habilitacao"] for h in oficio["hospitais"])

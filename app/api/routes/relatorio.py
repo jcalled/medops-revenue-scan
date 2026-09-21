@@ -25,6 +25,7 @@ from app.api.routes.explorar import (
 from app.db import get_db
 from app.domain.kit import referencia_padrao
 from app.domain.recuperacao import meses_carregados
+from app.domain.oficio import montar_oficio
 from app.domain.relatorio_recuperacao import montar_pacote, montar_relatorio
 from app.jobs import carga_sih
 from app.jobs import fila as fila_jobs
@@ -91,6 +92,27 @@ def pacote_de_correcao(
             "o hospital aplica as instruções no próprio sistema e reapresenta dentro do prazo, sem alterar datas."
         ),
     }
+
+
+@router.get("/letter")
+def oficio_para_a_secretaria(
+    f: Filtros = Depends(filtros),
+    acesso: Acesso = Depends(require_revenue_scan),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Números para o ofício de cada hospital à secretaria: habilitação, leitos, códigos sem descrição e teto de APAC."""
+    if f.vazio:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Escolha uma organização ou hospitais.")
+    linhas = hospitais_filtrados(db, acesso, f)
+    cnes = [s.cnes for s, _ in linhas]
+    recorte = {"titulo": _titulo(db, f), "filtros": {k: v for k, v in asdict(f).items() if v}}
+    if not cnes:
+        return {"recorte": recorte, "hospitais": [], "meses": []}
+    corpo = montar_oficio(db, cnes, meses_carregados(db, cnes))
+    ufs = {s.cnes: s.uf for s, _ in linhas}
+    for h in corpo["hospitais"]:
+        h["uf"] = ufs.get(h["cnes"])
+    return {"recorte": recorte, **corpo}
 
 
 ORDENS_RANKING = {
