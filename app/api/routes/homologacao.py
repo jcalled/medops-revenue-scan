@@ -19,7 +19,9 @@ from app.api.deps import Acesso
 from app.api.routes.dados import require_admin_plataforma
 from app.db import get_db
 from app.domain import homologacao
+from app.domain.relatorio_recuperacao import GRUPOS
 from app.domain.resumo import _nomes
+from app.engine.categorias import POR_CODIGO
 from app.models import HomologationBatch, HomologationItem, ManagementOrganization, OrganizationEstablishment, SihRejection
 
 router = APIRouter(prefix="/api/revenue-scan/homologation", tags=["homologacao"])
@@ -49,6 +51,8 @@ def _lote(db: Session, lote_id: int) -> HomologationBatch:
 def _item_json(i: HomologationItem, nomes: dict[str, str]) -> dict[str, Any]:
     return {"id": i.id, "n_aih": i.n_aih, "cnes": i.cnes, "hospital": nomes.get(i.cnes), "valor": float(i.valor),
             "motivos": i.motivos, "origem": i.origem, "regras": i.regras, "o_que_diz": i.o_que_diz, "correcao": i.correcao,
+            "situacao": i.situacao, "situacao_nome": GRUPOS.get(i.situacao or "", None), "prazo": i.prazo,
+            "categoria": i.categoria, "categoria_nome": POR_CODIGO[i.categoria].nome if i.categoria in POR_CODIGO else None,
             "veredito": i.veredito, "comentario": i.comentario, "respondido_por": i.respondido_por,
             "respondido_em": i.respondido_em.isoformat() if i.respondido_em else None}
 
@@ -99,7 +103,10 @@ def criar(pedido: PedidoLote, acesso: Acesso = Depends(require_admin_plataforma)
 
 @router.get("/batches/{lote_id}")
 def detalhe(lote_id: int, _: Acesso = Depends(require_admin_plataforma), db: Session = Depends(get_db)) -> dict[str, Any]:
-    return _lote_json(db, _lote(db, lote_id))
+    lote = _lote(db, lote_id)
+    if homologacao.completar_situacao(db, lote):
+        lote = _lote(db, lote_id)
+    return _lote_json(db, lote)
 
 
 @router.get("/batches/{lote_id}/sheet")

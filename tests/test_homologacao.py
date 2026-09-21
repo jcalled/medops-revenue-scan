@@ -42,17 +42,20 @@ def test_lote_planilha_e_confiabilidade(app_com_nucleo, fabrica_sessao):
     assert "CBO 225125" in itens["P1"]["o_que_diz"]
     assert itens["H1"]["origem"] == "KIT" and itens["H1"]["regras"] == ["KIT:060120"] and itens["H1"]["correcao"]
     assert lote["confiabilidade"]["respondidos"] == 0 and lote["confiabilidade"]["do_faturasus"] == 1
+    # Situação de cada AIH, como no relatório: capacidade e prazo não voltam; profissional volta no prazo.
+    assert itens["V1"]["situacao"] == "PERDIDA" and itens["Z1"]["situacao"] == "PERDIDA"
+    assert itens["G1"]["categoria"] == "ADMINISTRATIVO" and itens["P1"]["categoria_nome"]
 
     planilha = http.get(f"/api/revenue-scan/homologation/batches/{lote['id']}/sheet", headers=ADMIN).content.decode("utf-8-sig")
     linhas = planilha.strip().splitlines()
     assert linhas[0].startswith("AIH;CNES;Hospital") and len(linhas) == 8
     # O faturamento preenche: P1 certo, H1 parcial, G1 "não sei", S1 vazio, e uma AIH que não é do lote.
     preenchida = "\n".join([linhas[0],
-        "P1;;;;;;;;;certo;Confere com a escala;Ana (faturamento)",
-        "H1;;;;;;;;;PARCIAL;Faltou o procedimento secundário;Ana (faturamento)",
-        "G1;;;;;;;;;não sei;;Ana (faturamento)",
-        "S1;;;;;;;;;;;",
-        "9999999999999;;;;;;;;;CERTO;;"])
+        "P1;;;;;;;;;;;certo;Confere com a escala;Ana (faturamento)",
+        "H1;;;;;;;;;;;PARCIAL;Faltou o procedimento secundário;Ana (faturamento)",
+        "G1;;;;;;;;;;;não sei;;Ana (faturamento)",
+        "S1;;;;;;;;;;;;;",
+        "9999999999999;;;;;;;;;;;CERTO;;"])
     r = http.post(f"/api/revenue-scan/homologation/batches/{lote['id']}/sheet", headers=ADMIN,
                   files={"arquivo": ("preenchida.csv", preenchida.encode("utf-8"), "text/csv")}).json()
     assert (r["aplicados"], r["sem_veredito"], r["ignorados"]) == (3, 1, ["9999999999999"])
@@ -83,3 +86,18 @@ def test_so_administracao(app_com_nucleo, fabrica_sessao):
                                                                   "entitlement": {"product": "REVENUE_SCAN_SUS", "status": "ACTIVE", "modules": None, "scope": {}}}))
     assert http.post("/api/revenue-scan/homologation/batches", json={"cnes": [HRVJ]},
                      headers={"Authorization": f"Bearer {token()}"}).status_code == 403
+
+
+
+def test_lote_antigo_ganha_situacao_ao_abrir(app_com_nucleo, fabrica_sessao):
+    from app.models import HomologationItem
+
+    _preparar(fabrica_sessao)
+    http = _admin(app_com_nucleo)
+    lote = http.post("/api/revenue-scan/homologation/batches", json={"cnes": [HRVJ], "competencia": "202606"}, headers=ADMIN).json()
+    with fabrica_sessao() as db:
+        for i in db.query(HomologationItem).all():
+            i.situacao = i.prazo = i.categoria = None
+        db.commit()
+    aberto = http.get(f"/api/revenue-scan/homologation/batches/{lote['id']}", headers=ADMIN).json()
+    assert all(i["situacao"] for i in aberto["itens"])

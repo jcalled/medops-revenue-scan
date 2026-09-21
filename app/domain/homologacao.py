@@ -24,9 +24,10 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.domain.kits_motivo import kits_usados
+from app.domain.kit import classificar, referencia_padrao
+from app.domain.kits_motivo import classes_confirmadas, kits_usados
 from app.domain.prova import aih_rejeitadas
-from app.domain.relatorio_recuperacao import _apontamento, _prevencao
+from app.domain.relatorio_recuperacao import GRUPOS, _apontamento, _grupo, _prevencao
 from app.domain.resumo import _nomes
 from app.models import HomologationBatch, HomologationItem
 
@@ -76,6 +77,8 @@ def montar_lote(db: Session, *, cnes: list[str], competencia: str, titulo: str, 
     linhas = [l for l in linhas if l["competencia"] == competencia]
     prevencao = _prevencao(db, linhas)
     kits = kits_usados(db, {m["codigo"] for l in linhas for m in l["motivos"]})
+    confirmados = classes_confirmadas(db)
+    referencia = referencia_padrao()
     lote = HomologationBatch(titulo=titulo, organization_id=organization_id, cnes=sorted(set(cnes)),
                              competencia=competencia, criado_por=criado_por)
     for l in sorted(linhas, key=lambda l: (l["cnes"], -l["valor"])):
@@ -88,11 +91,30 @@ def montar_lote(db: Session, *, cnes: list[str], competencia: str, titulo: str, 
         else:
             descricoes = "; ".join(f"{m['codigo']} {m['descricao'] or 'sem descrição oficial'}" for m in l["motivos"])
             origem, regras, diz = "KIT", [f"KIT:{c}" for c in codigos], f"Motivo oficial: {descricoes}"
+        classe, prazo = classificar(l, referencia, confirmados)
         lote.itens.append(HomologationItem(n_aih=l["n_aih"], cnes=l["cnes"], valor=l["valor"], motivos=codigos,
-                                           origem=origem, regras=regras, o_que_diz=diz[:3000], correcao=correcao))
+                                           origem=origem, regras=regras, o_que_diz=diz[:3000], correcao=correcao,
+                                           situacao=_grupo(l, classe), prazo=prazo, categoria=l["categoria"]))
     db.add(lote)
     db.commit()
     return lote
+
+
+def completar_situacao(db: Session, lote: HomologationBatch) -> bool:
+    """Lote montado antes da situação existir: calcula situação, prazo e tipo de correção. Devolve se mudou."""
+    faltando = [i for i in lote.itens if i.situacao is None]
+    if not faltando:
+        return False
+    por_aih = {l["n_aih"]: l for l in aih_rejeitadas(db, lote.cnes, [lote.competencia])}
+    confirmados, referencia = classes_confirmadas(db), referencia_padrao()
+    for item in faltando:
+        l = por_aih.get(item.n_aih)
+        if l is None:
+            continue
+        classe, prazo = classificar(l, referencia, confirmados)
+        item.situacao, item.prazo, item.categoria = _grupo(l, classe), prazo, l["categoria"]
+    db.commit()
+    return True
 
 
 def confiabilidade(lote: HomologationBatch) -> dict[str, Any]:
@@ -122,8 +144,8 @@ def confiabilidade(lote: HomologationBatch) -> dict[str, Any]:
     }
 
 
-CABECALHO = ["AIH", "CNES", "Hospital", "Processamento", "Valor", "Motivos", "O que o sistema diz", "Correção proposta",
-             "Regra", "Veredito (CERTO, PARCIAL, ERRADO, NAO_SEI)", "Comentário", "Quem conferiu"]
+CABECALHO = ["AIH", "CNES", "Hospital", "Processamento", "Valor", "Situação", "Reapresentar até", "Motivos", "O que o sistema diz",
+             "Correção proposta", "Regra", "Veredito (CERTO, PARCIAL, ERRADO, NAO_SEI)", "Comentário", "Quem conferiu"]
 
 
 def planilha(db: Session, lote: HomologationBatch) -> str:
@@ -133,7 +155,7 @@ def planilha(db: Session, lote: HomologationBatch) -> str:
     escritor.writerow(CABECALHO)
     for i in lote.itens:
         escritor.writerow([i.n_aih, i.cnes, nomes.get(i.cnes) or "", lote.competencia, f"{float(i.valor):.2f}".replace(".", ","),
-                           ", ".join(i.motivos), i.o_que_diz, i.correcao, ", ".join(i.regras), i.veredito or "",
+                           GRUPOS.get(i.situacao or "", ""), f"{i.prazo[4:]}/{i.prazo[:4]}" if i.prazo else "", ", ".join(i.motivos), i.o_que_diz, i.correcao, ", ".join(i.regras), i.veredito or "",
                            i.comentario or "", i.respondido_por or ""])
     return "﻿" + saida.getvalue()
 

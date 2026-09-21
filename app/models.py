@@ -841,6 +841,10 @@ class HomologationItem(Base):
     regras: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
     o_que_diz: Mapped[str] = mapped_column(Text, nullable=False, default="")
     correcao: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # A_RECUPERAR | DEPENDE_GESTOR | PERDIDA | RECUPERADA | JA_APROVADA — a mesma do relatório, na data do lote.
+    situacao: Mapped[str | None] = mapped_column(String(16))
+    prazo: Mapped[str | None] = mapped_column(String(6))
+    categoria: Mapped[str | None] = mapped_column(String(30))
     # CERTO | ERRADO | PARCIAL | NAO_SEI; vazio enquanto ninguém conferiu.
     veredito: Mapped[str | None] = mapped_column(String(10))
     comentario: Mapped[str | None] = mapped_column(Text)
