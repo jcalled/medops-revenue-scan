@@ -148,6 +148,9 @@ def test_simulacao_faturasus_no_dado_publico(app_com_nucleo, fabrica_sessao):
     # Só o que ainda dá para recuperar entra; capacidade e prazo vencido ficam de fora.
     assert simulacao == {"PEGARIA": (1, 1000.0), "PRECISA_ARQUIVO": (1, 2000.0), "SEM_AVALIACAO": (4, 6000.0)}
     assert rel["simulacao_nomes"]["PEGARIA"] == "O FaturaSUS já aponta o erro"
+    # Na prevenção entra tudo o que foi rejeitado, inclusive o que já não volta.
+    antes = {s["grupo"]: s["aih"] for s in rel["antes_do_envio"]}
+    assert antes == {"PEGARIA": 1, "PRECISA_ARQUIVO": 1, "SEM_AVALIACAO": 36}
 
     pacote = _get(http, f"/api/revenue-scan/recovery-report/package?cnes={HRVJ}&referencia=202610")
     p1 = next(a for m in pacote["hospitais"][0]["motivos"] for a in m["aih"] if a["n_aih"] == "P1")

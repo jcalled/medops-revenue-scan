@@ -259,6 +259,8 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
     hospitais: dict[str, dict[str, Any]] = {}
     geral = _novo_bloco()
     geral_simulacao: dict[str, dict[str, float]] = defaultdict(_soma)
+    # Prevenção: de tudo o que foi rejeitado no período, o que o FaturaSUS teria apontado antes do envio.
+    geral_antes_do_envio: dict[str, dict[str, float]] = defaultdict(_soma)
     geral_recuperado_mes: dict[str, dict[str, float]] = defaultdict(_soma)
     geral_cobravel = 0.0
     for l in linhas:
@@ -270,11 +272,15 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
             "meses": defaultdict(_novo_bloco), "recuperado_por_mes": defaultdict(_soma),
             "motivos": defaultdict(lambda: {**_soma(), "descricao": None}), "cobravel": 0.0,
             "simulacao": defaultdict(_soma),
+            "antes_do_envio": defaultdict(_soma),
             "prevenir": defaultdict(lambda: {"rejeitado": _soma(), "nao_volta": _soma(), "motivos": defaultdict(float)}),
         })
         mes = h["meses"][l["competencia"]]
         codigos = {m["codigo"] for m in l["motivos"]}
         if grupo != "JA_APROVADA":
+            visto = _apontamento(prevencao.get((l["n_aih"], l["competencia"])))["grupo"]
+            _somar(h["antes_do_envio"][visto], valor)
+            _somar(geral_antes_do_envio[visto], valor)
             alvo_prevenir = h["prevenir"][l["categoria"]]
             _somar(alvo_prevenir["rejeitado"], valor)
             if grupo == "PERDIDA":
@@ -324,6 +330,7 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
             "motivos": [{"codigo": c, "descricao": v["descricao"], **_fechar(v)} for c, v in motivos],
             "taxa": _taxa(h["total"], h["cobravel"], percentual),
             "simulacao": _simulacao(h["simulacao"]),
+            "antes_do_envio": _simulacao(h["antes_do_envio"]),
             "apac": None,
             "prevenir": _prevenir(h["prevenir"], len(h["meses"]) or 1),
         }
@@ -353,6 +360,7 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
         "recuperado_por_mes": [{"competencia": c, **_fechar(v)} for c, v in sorted(geral_recuperado_mes.items())],
         "taxa": _taxa(geral, geral_cobravel, percentual),
         "simulacao": _simulacao(geral_simulacao),
+        "antes_do_envio": _simulacao(geral_antes_do_envio),
         "simulacao_nomes": SIMULACAO,
         "apac": _somar_apac(list(apac.values())),
         "hospitais": lista,
