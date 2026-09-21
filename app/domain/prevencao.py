@@ -19,8 +19,8 @@ from app.domain.resumo import _lotes
 from app.models import SihPrevention, SihRejection, SihRejectionReason
 
 GRUPOS = {
-    "PEGARIA": "O FaturaSUS pegaria antes do envio",
-    "CONFERIVEL_NAO_PEGOU": "Conferível, mas o FaturaSUS não pegou",
+    "PEGARIA": "Seria apontado antes do envio",
+    "CONFERIVEL_NAO_PEGOU": "Conferível, ainda não apontado",
     "PRECISA_ARQUIVO": "Precisa do arquivo do hospital",
     "SEM_REGRA": "Sem regra no FaturaSUS",
     "GESTOR": "Bloqueio do gestor",

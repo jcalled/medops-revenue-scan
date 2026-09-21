@@ -62,7 +62,7 @@ def relatorio_de_recuperacao(
         "ressalva": (
             "Dados públicos do DATASUS (SIH: RD, RJ e ER), com atraso de publicação. Recuperada é a AIH que aparece "
             "aprovada no RD num processamento posterior à rejeição: produção aprovada, não comprovante de recebimento. "
-            "Prazo de reapresentação estimado em até seis meses contados da alta (Portaria SAES/MS 1.110/2021); "
+            "Prazo de reapresentação estimado em até seis meses contados da alta (PRC SAES/MS 1/2022, art. 401, § 2º); "
             "confirmar o calendário do gestor. Valores a recuperar são oportunidade financeira estimada."
         ),
     }
