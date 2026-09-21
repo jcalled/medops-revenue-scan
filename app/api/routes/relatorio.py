@@ -23,7 +23,7 @@ from app.api.routes.explorar import Filtros, _titulo, filtros, hospitais_filtrad
 from app.db import get_db
 from app.domain.kit import referencia_padrao
 from app.domain.recuperacao import meses_carregados
-from app.domain.relatorio_recuperacao import montar_relatorio
+from app.domain.relatorio_recuperacao import montar_pacote, montar_relatorio
 from app.jobs import carga_sih
 from app.jobs import fila as fila_jobs
 from app.models import Establishment, ManagementOrganization, OrganizationEstablishment, SihHospitalMonth
@@ -61,6 +61,32 @@ def relatorio_de_recuperacao(
             "aprovada no RD num processamento posterior à rejeição: produção aprovada, não comprovante de recebimento. "
             "Prazo de reapresentação estimado em até seis meses contados da alta (Portaria SAES/MS 1.110/2021); "
             "confirmar o calendário do gestor. Valores a recuperar são oportunidade financeira estimada."
+        ),
+    }
+
+
+@router.get("/package")
+def pacote_de_correcao(
+    f: Filtros = Depends(filtros),
+    referencia: str | None = Query(default=None, pattern=_AAAAMM),
+    acesso: Acesso = Depends(require_revenue_scan),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Por hospital e motivo: o que corrigir, onde, com que documentos e a regra, e as AIH ainda no prazo."""
+    if f.vazio:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Escolha uma organização ou hospitais.")
+    cnes = [s.cnes for s, _ in hospitais_filtrados(db, acesso, f)]
+    recorte = {"titulo": _titulo(db, f), "filtros": {k: v for k, v in asdict(f).items() if v}}
+    if not cnes:
+        return {"recorte": recorte, "hospitais": [], "planilha": [], "meses": []}
+    corpo = montar_pacote(db, cnes, meses_carregados(db, cnes), referencia or referencia_padrao())
+    return {
+        "recorte": recorte,
+        **corpo,
+        "ressalva": (
+            "Instruções a partir do motivo oficial da rejeição (arquivo ER do DATASUS) e dos kits da MedOps, com a "
+            "regra de cada um. O arquivo corrigido sai do FaturaSUS a partir do TXT do SISAIH01 do hospital; sem ele, "
+            "o hospital aplica as instruções no próprio sistema e reapresenta dentro do prazo, sem alterar datas."
         ),
     }
 

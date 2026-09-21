@@ -101,11 +101,11 @@ def test_referencia_muda_o_que_venceu(app_com_nucleo, fabrica_sessao):
     _dados(fabrica_sessao)
     http, _ = app_com_nucleo(lambda r: httpx.Response(200, json=contrato()))
     kit = _get(http, "/api/revenue-scan/kit?uf=CE&referencia=202612")
-    # Em dezembro, só a do HRC ainda cabe; as de outubro e novembro venceram.
+    # Em dezembro, só a do HRC ainda cabe; as de outubro e novembro venceram — gestor e investigar também.
     assert kit["recuperavel_no_prazo"] == {"aih": 1, "valor": 700.0, "pct_valor": round(700 / 462600, 4)}
-    assert kit["classes"]["PRAZO_VENCIDO"]["aih"] == 3
+    assert kit["classes"]["PRAZO_VENCIDO"]["aih"] == 5
     janela = next(p for p in kit["perdas"] if p["codigo"] == "JANELA_REAPRESENTACAO")
-    assert (janela["aih"], janela["valor"]) == (2, 3000.0)
+    assert (janela["aih"], janela["valor"]) == (4, 7500.0)
 
 
 def test_escopo_do_contrato(app_com_nucleo, fabrica_sessao):
@@ -127,3 +127,11 @@ def test_classificar_e_referencia_padrao():
     com_capacidade = {**base, "motivos": [{"codigo": "060109"}, {"codigo": "060084"}]}
     assert classificar(com_capacidade, "202607") == ("NAO_REAPRESENTAVEL", "202611")
     assert referencia_padrao(date(2026, 9, 15)) == "202609"
+
+
+def test_gestor_e_investigar_tambem_vencem():
+    # A janela vale para AIH rejeitada ou bloqueada: gestor e investigar não ficam na lista depois do prazo.
+    base = {"situacao": "RECUPERAR", "dt_saida": "2026-02-10"}
+    assert classificar({**base, "categoria": "ADMINISTRATIVO", "motivos": [{"codigo": "020008"}]}, "202609") == ("PRAZO_VENCIDO", "202607")
+    assert classificar({**base, "categoria": "OUTROS", "motivos": [{"codigo": "999999"}]}, "202609") == ("PRAZO_VENCIDO", "202607")
+    assert classificar({**base, "categoria": "ADMINISTRATIVO", "motivos": [{"codigo": "020008"}]}, "202607")[0] == "GESTOR"

@@ -12,6 +12,7 @@ O que estes testes travam:
 import httpx
 
 from app.models import SihHospitalMonth
+from app.seed.kits_motivo import aplicar
 from tests.conftest import contrato, token
 from tests.test_dados import ADMIN, _admin, fila_falsa  # noqa: F401 — fixture
 from tests.test_kit import _dados, _get
@@ -86,3 +87,27 @@ def test_atualizar_so_os_meses_que_faltam(app_com_nucleo, fabrica_sessao, fila_f
     fila_falsa["trabalhos"].append({"tipo": "CARGA", "status": "RODANDO", "ufs": ["CE"]})
     corpo = http.post("/api/revenue-scan/recovery-report/refresh", json={"cnes": [HRVJ], "meses": 4}, headers=ADMIN).json()
     assert corpo["ufs"][0]["situacao"] == "JA_NA_FILA" and len(fila_falsa["cargas"]) == 1
+
+
+def test_pacote_de_correcao_por_motivo(app_com_nucleo, fabrica_sessao):
+    _dados(fabrica_sessao)
+    with fabrica_sessao() as db:
+        aplicar(db)
+    http, _ = app_com_nucleo(lambda r: httpx.Response(200, json=contrato()))
+    pacote = _get(http, f"/api/revenue-scan/recovery-report/package?cnes={HRVJ},{HRC}&referencia=202610")
+
+    [hrvj, hrc] = pacote["hospitais"]
+    assert hrvj["cnes"] == HRVJ and hrvj["total"] == {"aih": 5, "valor": 8300.0}   # só o que ainda está no prazo
+    assert hrvj["vence_neste_mes"] == {"aih": 1, "valor": 2000.0}
+    assert [m["codigo"] for m in hrvj["motivos"]] == ["010003", "060120", "060109", "999999"]
+    profissional = hrvj["motivos"][2]
+    assert profissional["kit"]["passos"] and profissional["kit"]["fonte"]              # o que fazer e a regra
+    assert [a["n_aih"] for a in profissional["aih"]] == ["P1", "S1"]                   # com prazo antes, sem data no fim
+    assert all(a["botao_faturasus"] for a in profissional["aih"])
+    assert hrc["motivos"][0]["aih"][0]["n_aih"] == "B1"
+
+    linhas = pacote["planilha"]
+    assert len(linhas) == 6 and {l["n_aih"] for l in linhas} == {"P1", "H1", "G1", "O1", "S1", "B1"}
+    assert next(l for l in linhas if l["n_aih"] == "P1")["botao_faturasus"].startswith("sim")
+    # Capacidade e prazo vencido não entram no pacote: não há o que reapresentar.
+    assert not {"V1", "Z1"} & {l["n_aih"] for l in linhas}

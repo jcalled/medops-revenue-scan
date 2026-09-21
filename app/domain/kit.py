@@ -133,11 +133,12 @@ def classificar(linha: dict[str, Any], referencia: str,
     if classe == "JA_RECEBIDA":
         # Um manual de motivo não substitui a aprovação efetivamente localizada no RD.
         classe = "INVESTIGAR"
-    if classe in RECUPERAVEIS:
-        if prazo is None:
-            return "INVESTIGAR", None
-        if prazo < referencia:
-            return "PRAZO_VENCIDO", prazo
+    if classe in RECUPERAVEIS and prazo is None:
+        return "INVESTIGAR", None
+    # A janela de reapresentação vale para AIH rejeitada ou bloqueada (art. 401, § 2º, PRC SAES/MS 1/2022):
+    # o que depende do gestor ou de investigar também vence.
+    if classe in NA_LISTA_DE_TRABALHO and prazo is not None and prazo < referencia:
+        return "PRAZO_VENCIDO", prazo
     return classe, prazo
 
 

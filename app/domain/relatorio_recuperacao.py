@@ -38,7 +38,7 @@ GRUPOS = {
     "RECUPERADA": "Já recuperada",
     "A_RECUPERAR": "A recuperar",
     "DEPENDE_GESTOR": "Depende do gestor",
-    "PERDIDA": "Perdida (regra do MS)",
+    "PERDIDA": "Não recuperável (regra do MS)",
     "JA_APROVADA": "Já aprovada antes",
 }
 # Motivos que o botão de correção do FaturaSUS resolve quando o hospital manda o TXT do SISAIH01.
@@ -176,3 +176,65 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
         "sem_rejeicao": sorted(set(cnes) - set(hospitais)),
         "gerado_em": date.today().isoformat(),
     }
+
+
+def montar_pacote(db: Session, cnes: list[str], meses: list[str], referencia: str) -> dict[str, Any]:
+    """
+    Pacote de correção para o hospital: por motivo, o que fazer, onde, com que
+    documentos e qual regra — e as AIH ainda no prazo que dependem dele.
+
+    Sai do dado público: diz o que mudar, mas o arquivo corrigido depende do TXT
+    do SISAIH01 do hospital (é ele que o botão do FaturaSUS corrige).
+    """
+    from app.domain.kits_motivo import kits_usados
+
+    linhas = aih_rejeitadas(db, cnes, meses)
+    nomes = _nomes(db, cnes)
+    confirmados = classes_confirmadas(db)
+    abertas = []
+    for l in linhas:
+        classe, prazo = classificar(l, referencia, confirmados)
+        grupo = _grupo(l, classe)
+        if grupo in ("A_RECUPERAR", "DEPENDE_GESTOR"):
+            abertas.append((l, classe, prazo, grupo))
+    kits = kits_usados(db, {m["codigo"] for l, *_ in abertas for m in l["motivos"]})
+
+    hospitais: dict[str, dict[str, Any]] = {}
+    planilha = []
+    for l, classe, prazo, grupo in abertas:
+        codigos = [m["codigo"] for m in l["motivos"]]
+        botao = bool(codigos) and set(codigos) <= MOTIVOS_DO_BOTAO
+        h = hospitais.setdefault(l["cnes"], {"cnes": l["cnes"], "nome": nomes.get(l["cnes"]), "total": _soma(),
+                                             "vence_neste_mes": _soma(), "motivos": {}})
+        _somar(h["total"], l["valor"])
+        if prazo == referencia:
+            _somar(h["vence_neste_mes"], l["valor"])
+        aih = {"n_aih": l["n_aih"], "competencia": l["competencia"], "dt_saida": l["dt_saida"], "prazo": prazo,
+               "valor": l["valor"], "procedimento": l["procedimento"], "grupo": grupo, "botao_faturasus": botao,
+               "motivos": codigos}
+        for m in l["motivos"] or [{"codigo": "SEM_MOTIVO", "descricao": "Motivo não publicado no ER"}]:
+            alvo = h["motivos"].setdefault(m["codigo"], {"codigo": m["codigo"], "descricao": m["descricao"],
+                                                         "kit": kits.get(m["codigo"]), "total": _soma(), "aih": []})
+            _somar(alvo["total"], l["valor"])
+            alvo["aih"].append(aih)
+            kit = kits.get(m["codigo"]) or {}
+            planilha.append({
+                "cnes": l["cnes"], "hospital": nomes.get(l["cnes"]), "n_aih": l["n_aih"], "competencia": l["competencia"],
+                "dt_saida": l["dt_saida"], "prazo": prazo, "valor": l["valor"], "procedimento": l["procedimento"],
+                "motivo": m["codigo"], "descricao": m["descricao"], "grupo": GRUPOS[grupo],
+                "onde_corrigir": kit.get("onde_nome"), "o_que_fazer": " | ".join(kit.get("passos") or []),
+                "regra": kit.get("fonte"), "botao_faturasus": "sim, com o TXT do hospital" if botao else "não",
+            })
+
+    saida = []
+    for h in hospitais.values():
+        motivos = sorted(h["motivos"].values(), key=lambda m: -m["total"]["valor"])
+        for m in motivos:
+            m["total"] = _fechar(m["total"])
+            m["aih"].sort(key=lambda a: (a["prazo"] or "999999", -a["valor"]))
+        saida.append({"cnes": h["cnes"], "nome": h["nome"], "total": _fechar(h["total"]),
+                      "vence_neste_mes": _fechar(h["vence_neste_mes"]), "motivos": motivos})
+    saida.sort(key=lambda h: -h["total"]["valor"])
+    planilha.sort(key=lambda p: (p["hospital"] or "", p["prazo"] or "999999", -p["valor"]))
+    return {"referencia": referencia, "meses": meses, "hospitais": saida, "planilha": planilha,
+            "gerado_em": date.today().isoformat()}
