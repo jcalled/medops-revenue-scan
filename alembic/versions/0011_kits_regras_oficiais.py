@@ -6,6 +6,8 @@ Create Date: 2026-09-21
 
 Atualiza só os kits que ninguém editou pela tela (atualizado_por vazio) e inclui
 os que faltam. Kit editado ou confirmado por uma pessoa fica como está.
+
+A classe NAO_REAPRESENTAVEL tem 18 letras: a coluna passa de 16 para 24 antes dos textos.
 """
 import sqlalchemy as sa
 from alembic import op
@@ -23,6 +25,9 @@ _CAMPOS = ("titulo", "significado", "classe", "onde_corrigir", "passos", "dados_
 
 def upgrade() -> None:
     from app.seed.kits_motivo import KITS
+
+    with op.batch_alter_table("motive_kits") as tabela:
+        tabela.alter_column("classe", type_=sa.String(24), existing_type=sa.String(16), existing_nullable=False)
 
     kits = sa.table(
         "motive_kits",

@@ -634,7 +634,7 @@ class MotiveKit(_Publico, Base):
     titulo: Mapped[str] = mapped_column(String(160), nullable=False)
     significado: Mapped[str] = mapped_column(Text, nullable=False)
     # ALTA | MEDIA | INCERTA | INVESTIGAR | GESTOR | PRAZO_VENCIDO | JA_RECEBIDA
-    classe: Mapped[str] = mapped_column(String(16), nullable=False)
+    classe: Mapped[str] = mapped_column(String(24), nullable=False)
     # CNES | SISAIH01 | PRONTUARIO | SESA | NENHUM
     onde_corrigir: Mapped[str] = mapped_column(String(12), nullable=False)
     passos: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
