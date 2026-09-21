@@ -20,7 +20,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
-    JSON, BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text,
+    JSON, BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, Numeric, String, Text,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -703,3 +703,34 @@ class MotivePreventionStat(_Publico, Base):
     pegaria: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     regras: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
     atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ContractFile(_Privado, Base):
+    """
+    Arquivo que o hospital ou a OSS entregou pelo contrato: fica do tenant, à
+    parte do dado público. O SISAIH01 vai para o FaturaSUS do núcleo, que guarda
+    o original; aqui fica a referência da análise e o resumo. Os demais ficam
+    guardados aqui, com o hash, para a conferência.
+    """
+
+    __tablename__ = "contract_files"
+
+    id: Mapped[int] = mapped_column(_ID, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    organization_id: Mapped[int | None] = mapped_column(
+        ForeignKey("management_organizations.id", ondelete="SET NULL"), index=True)
+    cnes: Mapped[str | None] = mapped_column(String(7))
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    competencia: Mapped[str | None] = mapped_column(String(6))
+    nome: Mapped[str] = mapped_column(String(255), nullable=False)
+    tamanho: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    conteudo: Mapped[bytes | None] = mapped_column(LargeBinary)
+    analysis_id: Mapped[int | None] = mapped_column(Integer)
+    resumo: Mapped[dict[str, Any] | None] = mapped_column(_JSON)
+    enviado_por: Mapped[int | None] = mapped_column(Integer)
+    enviado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_contract_files_tenant_org", "tenant_id", "organization_id"),
+    )
