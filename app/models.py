@@ -850,3 +850,27 @@ class HomologationItem(Base):
     lote: Mapped[HomologationBatch] = relationship(back_populates="itens")
 
     __table_args__ = (UniqueConstraint("batch_id", "n_aih", name="uq_homologation_items"),)
+
+
+class PublicPresentation(Base):
+    """
+    Apresentação aberta por link, sem login: um retrato dos números agregados
+    tirado na hora de gerar. Guarda só o hash do token — o link não se reconstrói
+    pelo banco —, vence, pode ser revogado e conta as visualizações.
+    """
+
+    __tablename__ = "public_presentations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    titulo: Mapped[str] = mapped_column(String(255), nullable=False)
+    organization_id: Mapped[int | None] = mapped_column(ForeignKey("management_organizations.id", ondelete="SET NULL"))
+    cnes: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    percentual: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    retrato: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False, default=dict)
+    criado_por: Mapped[int | None] = mapped_column(Integer)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expira_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revogado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    visualizacoes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ultima_visualizacao: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -3,8 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app.api.routes import (
-    alertas, contrato, dados, explorar, gestao, health, homologacao, kit, kits_motivo, me, organizacoes, prospeccao,
-    prova, recuperacao, relatorio, scan,
+    alertas, apresentacao_publica, contrato, dados, explorar, gestao, health, homologacao, kit, kits_motivo, me,
+    organizacoes, prospeccao, prova, recuperacao, relatorio, scan,
 )
 from app.config import get_settings
 
@@ -35,6 +35,7 @@ def create_app() -> FastAPI:
     app.include_router(contrato.router)
     app.include_router(alertas.router)
     app.include_router(homologacao.router)
+    app.include_router(apresentacao_publica.router)
     return app
 
 
