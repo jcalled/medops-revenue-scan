@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import Acesso, require_revenue_scan
 from app.api.routes.organizacoes import organizacao_no_escopo
 from app.db import get_db
+from app.domain import criticas_sia
 from app.domain.contrato import LEITURAS, TAMANHO_MAXIMO, TIPOS
 from app.models import ContractFile
 
@@ -34,11 +35,14 @@ def require_tenant(acesso: Acesso = Depends(require_revenue_scan)) -> Acesso:
     return acesso
 
 
-def _json(a: ContractFile) -> dict[str, Any]:
+def _json(a: ContractFile, completo: bool = False) -> dict[str, Any]:
+    resumo = a.resumo
+    if resumo and not completo and "itens" in resumo:
+        resumo = {k: v for k, v in resumo.items() if k != "itens"}
     return {
         "id": a.id, "organization_id": a.organization_id, "cnes": a.cnes, "tipo": a.tipo,
         "tipo_nome": TIPOS.get(a.tipo, {}).get("titulo", a.tipo), "competencia": a.competencia, "nome": a.nome,
-        "tamanho": a.tamanho, "sha256": a.sha256, "analysis_id": a.analysis_id, "resumo": a.resumo,
+        "tamanho": a.tamanho, "sha256": a.sha256, "analysis_id": a.analysis_id, "resumo": resumo,
         "enviado_em": a.enviado_em.isoformat() if a.enviado_em else None,
     }
 
@@ -110,6 +114,12 @@ async def enviar(
         dados_resumo = json.loads(resumo) if resumo else None
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Resumo inválido.") from exc
+    if tipo == "CRITICAS_SIA":
+        dados_resumo = criticas_sia.ler(conteudo, nome)
+        if not dados_resumo["linhas_lidas"]:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail="Nenhuma APAC encontrada no arquivo. Envie a planilha ou o CSV do relatório de "
+                                       "críticas, com o número da APAC (13 dígitos) e o erro.")
 
     registro = ContractFile(
         tenant_id=acesso.principal.tenant_id, organization_id=organizacao,
@@ -121,6 +131,12 @@ async def enviar(
     db.add(registro)
     db.commit()
     return _json(registro)
+
+
+@router.get("/files/{arquivo_id}")
+def detalhe(arquivo_id: int, acesso: Acesso = Depends(require_tenant), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """O arquivo com a leitura completa (as APAC criticadas, uma a uma), para a tela e o relatório."""
+    return _json(_do_tenant(db, acesso, arquivo_id), completo=True)
 
 
 def _do_tenant(db: Session, acesso: Acesso, arquivo_id: int) -> ContractFile:
