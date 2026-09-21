@@ -762,3 +762,42 @@ class SiaApacMonth(_Publico, Base):
         UniqueConstraint("uf", "competencia", "cnes", name="uq_sia_apac_month"),
         Index("ix_sia_apac_month_cnes", "cnes", "competencia"),
     )
+
+
+class AlertSubscription(Base):
+    """
+    Alerta mensal de uma organização: para quem mandar e o que incluir. É da
+    administração da plataforma (dado público do DATASUS); os e-mails são dos
+    contatos da OSS e só aparecem para quem administra.
+    """
+
+    __tablename__ = "alert_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("management_organizations.id", ondelete="CASCADE"), nullable=False, unique=True)
+    emails: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    incluir_honorarios: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    percentual: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=15)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AlertIssue(Base):
+    """Um alerta gerado: um por organização e mês novo carregado, com o conteúdo e o resultado do envio."""
+
+    __tablename__ = "alert_issues"
+
+    id: Mapped[int] = mapped_column(_ID, primary_key=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("management_organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    competencia: Mapped[str] = mapped_column(String(6), nullable=False)
+    referencia: Mapped[str] = mapped_column(String(6), nullable=False)
+    conteudo: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False, default=dict)
+    destinatarios: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    # ENVIADO | SO_NA_TELA (e-mail não configurado) | SEM_DESTINATARIO | FALHOU
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    erro: Mapped[str | None] = mapped_column(Text)
+    gerado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (UniqueConstraint("organization_id", "competencia", name="uq_alert_issues"),)

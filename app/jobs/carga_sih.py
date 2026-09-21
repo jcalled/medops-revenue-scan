@@ -350,6 +350,13 @@ def job_carregar_uf(uf: str, competencias: list[str] | None = None, quantidade: 
             logger.exception("Leitos e habilitações do CNES de %s não carregados", uf)
         recalcular(db, ufs=[validar_uf(uf)])
         try:
+            from app.domain.alertas import gerar_alertas
+
+            gerar_alertas(db, ufs=[validar_uf(uf)])
+        except Exception:  # noqa: BLE001 — o alerta sai no próximo mês novo ou pelo "enviar agora"
+            db.rollback()
+            logger.exception("Alertas mensais de %s não gerados", uf)
+        try:
             from app.domain.recuperacao import conferir_ativos
 
             conferir_ativos(db)

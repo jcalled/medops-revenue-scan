@@ -200,7 +200,8 @@ def _capacidade(db: Session, cnes: list[str], meses: list[str]) -> dict[str, dic
     for lote in _lotes(cnes):
         for m in db.execute(select(SihHospitalMonth).where(SihHospitalMonth.cnes.in_(lote),
                                                            SihHospitalMonth.competencia.in_(meses))).scalars():
-            diarias[m.cnes].append(m.diarias)
+            # Leitos gerais contra diárias gerais: a UTI tem conta própria no SIH.
+            diarias[m.cnes].append(max(0, m.diarias - m.diarias_uti))
     saida = {}
     for c in set(leitos) | set(diarias):
         l, d = leitos.get(c), diarias.get(c) or []

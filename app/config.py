@@ -35,6 +35,19 @@ class Settings:
     db_max_overflow: int = 1
     # Chave serviço a serviço para o FaturaSUS do núcleo (prevenção). Vazia: a prevenção não roda.
     internal_service_token: str = ""
+    # E-mail dos alertas mensais. Sem SMTP_HOST, o alerta fica só na tela de Alertas.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_tls: bool = True
+    # Endereço da plataforma, para os links dos alertas.
+    app_url: str = "https://www.glosaai.com.br"
+
+    @property
+    def email_configurado(self) -> bool:
+        return bool(self.smtp_host and self.smtp_from)
 
     @property
     def producao(self) -> bool:
@@ -56,6 +69,13 @@ def carregar() -> Settings:
         db_pool_size=int(os.getenv("DB_POOL_SIZE", "2")),
         db_max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "1")),
         internal_service_token=os.getenv("INTERNAL_SERVICE_TOKEN", ""),
+        smtp_host=os.getenv("SMTP_HOST", ""),
+        smtp_port=int(os.getenv("SMTP_PORT", "587")),
+        smtp_user=os.getenv("SMTP_USER", ""),
+        smtp_password=os.getenv("SMTP_PASSWORD", ""),
+        smtp_from=os.getenv("SMTP_FROM", ""),
+        smtp_tls=os.getenv("SMTP_TLS", "1").lower() not in {"0", "false", "nao", "não"},
+        app_url=os.getenv("APP_URL", "https://www.glosaai.com.br").rstrip("/"),
     )
     if not _NOME_SCHEMA.match(settings.db_schema):
         raise RuntimeError(f"DB_SCHEMA inválido: {settings.db_schema!r}")
