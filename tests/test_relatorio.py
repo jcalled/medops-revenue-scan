@@ -176,3 +176,19 @@ def test_apac_acima_do_teto_fica_a_parte(app_com_nucleo, fabrica_sessao):
     assert rel["total"]["A_RECUPERAR"]["valor"] == 3700.0          # a APAC não entra no recuperável
     assert rel["apac"]["teto"] == 800.0
     assert next(h for h in rel["hospitais"] if h["cnes"] == HRC)["apac"] is None
+
+
+def test_como_deixar_de_perder(app_com_nucleo, fabrica_sessao):
+    _dados(fabrica_sessao)
+    http, _ = app_com_nucleo(lambda r: httpx.Response(200, json=contrato()))
+    rel = _get(http, f"/api/revenue-scan/recovery-report?cnes={HRVJ}&referencia=202610")
+    [hrvj] = rel["hospitais"]
+    prevenir = {p["categoria"]: p for p in hrvj["prevenir"]}
+    capacidade = prevenir["CAPACIDADE"]
+    assert hrvj["prevenir"][0]["categoria"] == "CAPACIDADE"                       # a maior perda vem primeiro
+    assert capacidade["rejeitado"] == {"aih": 31, "valor": 453000.0}             # 30 de maio (uma voltou) e a V1
+    assert capacidade["nao_volta"] == {"aih": 30, "valor": 438000.0}
+    assert capacidade["media_mensal"] == 226500.0                                  # dois meses com rejeição
+    assert "CNES" in capacidade["como_evitar"] and capacidade["motivos"] == ["060082"]
+    assert "PRAZO" in prevenir and prevenir["PRAZO"]["nao_volta"]["valor"] == 600.0
+    assert set(hrvj["capacidade"]) >= {"leitos_sus", "limite_diarias_mes", "diarias_mes", "ocupacao"}

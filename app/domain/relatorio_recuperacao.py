@@ -33,7 +33,8 @@ from app.domain.kits_motivo import classes_confirmadas
 from app.domain.prova import aih_rejeitadas
 from app.domain.resumo import _lotes, _nomes
 from app.domain.prevencao import GRUPOS as GRUPOS_FATURASUS
-from app.models import SiaApacMonth, SihApprovedAih, SihPrevention
+from app.engine.categorias import POR_CODIGO, categorizar
+from app.models import CnesBed, SiaApacMonth, SihApprovedAih, SihHospitalMonth, SihPrevention
 
 GRUPOS = {
     "RECUPERADA": "Já recuperada",
@@ -156,6 +157,62 @@ def _somar_apac(itens: list[dict[str, Any]]) -> dict[str, Any] | None:
     return _fechar_apac(total)
 
 
+# Como deixar de perder no mês seguinte, por tipo de rejeição. É o que evita a perda — a
+# recuperação da AIH já rejeitada está no pacote de correção.
+COMO_EVITAR = {
+    "CAPACIDADE": "Antes de fechar o lote, somar as diárias do mês contra os leitos SUS do CNES × dias — o FaturaSUS "
+                  "avisa. Se o hospital opera mais leitos SUS do que o CNES mostra, atualizar o CNES: a capacidade dos "
+                  "próximos meses sobe. AIH rejeitada por capacidade é cancelada; aqui, só prevenir resolve.",
+    "LEITO_CNES": "Cadastrar e habilitar no CNES os leitos de UTI e UCI que o hospital cobra, ou deixar de cobrar a "
+                  "diária de leito sem habilitação. O volume abaixo sustenta o pedido de habilitação à secretaria.",
+    "HABILITACAO_SERVICO": "Pedir a habilitação dos procedimentos que o hospital já realiza — o volume e o valor abaixo "
+                           "sustentam o pedido — e manter serviços e classificações do CNES em dia, inclusive terceiros.",
+    "PRAZO": "Controlar o prazo de cada AIH: apresentar até o 4º mês contado da alta. O relatório mostra o que vence no mês.",
+    "REGRAS_SIGTAP": "Passar o lote no FaturaSUS antes do envio: quantidades, compatibilidades, OPM e permanência "
+                     "pelas regras do SIGTAP da competência.",
+    "PROFISSIONAL": "Atualizar o CNES do corpo clínico (vínculo e CBO) antes do fechamento; o FaturaSUS confere cada "
+                    "profissional no arquivo do hospital.",
+    "PACIENTE": "Conferir CNS do paciente e internações sobrepostas antes do envio.",
+    "ADMINISTRATIVO": "Resolver com a secretaria, antes da competência, faixas de numeração de AIH, bloqueios e teto.",
+    "OUTROS": "Pedir à secretaria o significado dos motivos sem descrição e a regra que os dispara: um código "
+              "explicado costuma destravar muitas AIH de uma vez.",
+}
+APAC_COMO_EVITAR = ("Renegociar a programação (teto) com o gestor, mostrando a produção acima do teto por procedimento "
+                    "— em geral oncologia. É a produção que o hospital já faz e não recebe.")
+
+
+def _capacidade(db: Session, cnes: list[str], meses: list[str]) -> dict[str, dict[str, Any]]:
+    """Leitos SUS do CNES × dias contra as diárias do mês (aprovadas e rejeitadas): a conta que o SIH faz."""
+    leitos: dict[str, dict[str, int]] = defaultdict(lambda: {"sus": 0, "existentes": 0, "uti_sus": 0})
+    ultima = {}
+    for lote in _lotes(cnes):
+        for c in db.execute(select(CnesBed).where(CnesBed.cnes.in_(lote))).scalars():
+            ultima[c.cnes] = max(ultima.get(c.cnes, ""), c.competencia)
+        for c in db.execute(select(CnesBed).where(CnesBed.cnes.in_(lote))).scalars():
+            if c.competencia != ultima.get(c.cnes):
+                continue
+            if c.tipo_leito == "3":
+                leitos[c.cnes]["uti_sus"] += c.qt_sus
+            else:
+                leitos[c.cnes]["sus"] += c.qt_sus
+                leitos[c.cnes]["existentes"] += c.qt_existente
+    diarias: dict[str, list[int]] = defaultdict(list)
+    for lote in _lotes(cnes):
+        for m in db.execute(select(SihHospitalMonth).where(SihHospitalMonth.cnes.in_(lote),
+                                                           SihHospitalMonth.competencia.in_(meses))).scalars():
+            diarias[m.cnes].append(m.diarias)
+    saida = {}
+    for c in set(leitos) | set(diarias):
+        l, d = leitos.get(c), diarias.get(c) or []
+        media = round(sum(d) / len(d)) if d else 0
+        limite = (l["sus"] * 30) if l else 0
+        saida[c] = {"leitos_sus": l["sus"] if l else 0, "leitos_existentes": l["existentes"] if l else 0,
+                    "leitos_uti_sus": l["uti_sus"] if l else 0, "limite_diarias_mes": limite,
+                    "diarias_mes": media, "ocupacao": round(media / limite, 3) if limite else None,
+                    "cnes_competencia": ultima.get(c)}
+    return saida
+
+
 def _novo_bloco() -> dict[str, Any]:
     return {"rejeitadas": _soma(), **{g: _soma() for g in GRUPOS}, "botao": _soma(), "vence_neste_mes": _soma()}
 
@@ -171,6 +228,20 @@ def _taxa(bloco: dict[str, Any], recuperado_cobravel: float, percentual: float) 
         "estimada_sobre_a_recuperar": round(bloco["A_RECUPERAR"]["valor"] * percentual / 100, 2),
         "estimada_com_gestor": round((bloco["A_RECUPERAR"]["valor"] + bloco["DEPENDE_GESTOR"]["valor"]) * percentual / 100, 2),
     }
+
+
+def _prevenir(por_categoria: dict[str, dict[str, Any]], meses: int) -> list[dict[str, Any]]:
+    itens = []
+    for codigo, p in por_categoria.items():
+        categoria = POR_CODIGO.get(codigo)
+        itens.append({
+            "categoria": codigo, "nome": categoria.nome if categoria else codigo,
+            "rejeitado": _fechar(p["rejeitado"]), "nao_volta": _fechar(p["nao_volta"]),
+            "media_mensal": round(p["rejeitado"]["valor"] / meses, 2),
+            "como_evitar": COMO_EVITAR.get(codigo, COMO_EVITAR["OUTROS"]),
+            "motivos": [c for c, _ in sorted(p["motivos"].items(), key=lambda kv: -kv[1])[:3]],
+        })
+    return sorted(itens, key=lambda p: -p["media_mensal"])
 
 
 def _simulacao(somas: dict[str, dict[str, float]]) -> list[dict[str, Any]]:
@@ -199,9 +270,19 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
             "meses": defaultdict(_novo_bloco), "recuperado_por_mes": defaultdict(_soma),
             "motivos": defaultdict(lambda: {**_soma(), "descricao": None}), "cobravel": 0.0,
             "simulacao": defaultdict(_soma),
+            "prevenir": defaultdict(lambda: {"rejeitado": _soma(), "nao_volta": _soma(), "motivos": defaultdict(float)}),
         })
         mes = h["meses"][l["competencia"]]
         codigos = {m["codigo"] for m in l["motivos"]}
+        if grupo != "JA_APROVADA":
+            alvo_prevenir = h["prevenir"][l["categoria"]]
+            _somar(alvo_prevenir["rejeitado"], valor)
+            if grupo == "PERDIDA":
+                _somar(alvo_prevenir["nao_volta"], valor)
+            for m in l["motivos"]:
+                # Só os motivos do próprio tipo: a AIH pode ter outros, contados no tipo deles.
+                if categorizar([m["codigo"]]).codigo == l["categoria"]:
+                    alvo_prevenir["motivos"][m["codigo"]] += valor
 
         if grupo == "RECUPERADA":
             depois = sorted(a for a in aprovacoes.get(l["n_aih"], []) if a[0] > l["competencia"])
@@ -244,14 +325,24 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
             "taxa": _taxa(h["total"], h["cobravel"], percentual),
             "simulacao": _simulacao(h["simulacao"]),
             "apac": None,
+            "prevenir": _prevenir(h["prevenir"], len(h["meses"]) or 1),
         }
 
     apac = _apac(db, cnes, meses)
     lista = sorted((linha_hospital(h) for h in hospitais.values()),
                    key=lambda h: -(h["total"]["A_RECUPERAR"]["valor"] + h["total"]["DEPENDE_GESTOR"]["valor"]
                                    + h["total"]["RECUPERADA"]["valor"]))
+    capacidade = _capacidade(db, cnes, meses)
     for h in lista:
         h["apac"] = apac.get(h["cnes"])
+        h["capacidade"] = capacidade.get(h["cnes"])
+        if h["apac"] and h["apac"]["teto"] > 0:
+            n = len(h["apac"]["meses"]) or 1
+            h["prevenir"].append({"categoria": "APAC_TETO", "nome": "APAC acima do teto (SIA)",
+                                  "rejeitado": {"aih": 0, "valor": h["apac"]["teto"]},
+                                  "nao_volta": {"aih": 0, "valor": 0.0}, "media_mensal": round(h["apac"]["teto"] / n, 2),
+                                  "como_evitar": APAC_COMO_EVITAR, "motivos": []})
+            h["prevenir"].sort(key=lambda p: -p["media_mensal"])
     return {
         "referencia": referencia,
         "meses": meses,
