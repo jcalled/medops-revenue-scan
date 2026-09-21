@@ -435,7 +435,8 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
     }
 
 
-def montar_pacote(db: Session, cnes: list[str], meses: list[str], referencia: str) -> dict[str, Any]:
+def montar_pacote(db: Session, cnes: list[str], meses: list[str], referencia: str,
+                  so_aih: set[str] | None = None) -> dict[str, Any]:
     """
     Pacote de correção para o hospital: por motivo, o que fazer, onde, com que
     documentos e qual regra — e as AIH ainda no prazo que dependem dele.
@@ -450,6 +451,8 @@ def montar_pacote(db: Session, cnes: list[str], meses: list[str], referencia: st
     confirmados = classes_confirmadas(db)
     abertas = []
     for l in linhas:
+        if so_aih is not None and l["n_aih"] not in so_aih:
+            continue
         classe, prazo = classificar(l, referencia, confirmados)
         grupo = _grupo(l, classe)
         if grupo in ("A_RECUPERAR", "DEPENDE_GESTOR"):

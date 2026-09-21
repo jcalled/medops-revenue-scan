@@ -471,6 +471,8 @@ class RecoveryTracking(_Privado, Base):
     fixo_por_hospital: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=6900)
     # ATIVO | ENCERRADO
     status: Mapped[str] = mapped_column(String(12), nullable=False, default="ATIVO")
+    # CONTRATO: marca sozinho as AIH rejeitadas dos hospitais. PILOTO: só as AIH escolhidas, para provar o êxito.
+    tipo: Mapped[str] = mapped_column(String(10), nullable=False, default="CONTRATO", server_default="CONTRATO")
     criado_por: Mapped[int | None] = mapped_column(Integer)
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     conferido_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

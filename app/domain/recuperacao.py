@@ -148,6 +148,8 @@ def conferir(db: Session, t: RecoveryTracking) -> dict[str, int]:
     for n_aih, lista in rejeicoes.items():
         voltas = aprovacoes.get(n_aih, [])
         item = existentes.get(n_aih)
+        if item is None and t.tipo == "PILOTO":
+            continue  # o piloto acompanha só as AIH que foram escolhidas
         if item is None:
             antes = [r for r in lista if r.competencia < t.inicio]
             if antes:
