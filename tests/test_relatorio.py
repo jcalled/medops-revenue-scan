@@ -195,3 +195,22 @@ def test_como_deixar_de_perder(app_com_nucleo, fabrica_sessao):
     assert "CNES" in capacidade["como_evitar"] and capacidade["motivos"] == ["060082"]
     assert "PRAZO" in prevenir and prevenir["PRAZO"]["nao_volta"]["valor"] == 600.0
     assert set(hrvj["capacidade"]) >= {"leitos_sus", "limite_diarias_mes", "diarias_mes", "ocupacao"}
+
+
+def test_com_e_sem_o_software_e_semelhantes(app_com_nucleo, fabrica_sessao):
+    _dados(fabrica_sessao)
+    http, _ = app_com_nucleo(lambda r: httpx.Response(200, json=contrato()))
+    rel = _get(http, f"/api/revenue-scan/recovery-report?cnes={HRVJ},{HRC}&referencia=202610")
+    c = rel["cenarios"]
+    # Sem: o que já voltou aprovado, medido. Com: projeção — conservador soma a chance alta; completo, tudo no prazo.
+    assert c["sem_software"] == {"valor": 15000.0, "pct": round(15000 / 462600, 4)}
+    assert c["com_software_conservador"]["valor"] == 16700.0          # P1 e B1 são chance alta
+    assert c["com_software_completo"]["valor"] == 24000.0
+    # Honorários só sobre o que passa do que o hospital já recupera sozinho.
+    assert (c["com_software_conservador"]["honorarios"], c["com_software_completo"]["honorarios"]) == (255.0, 1350.0)
+    assert c["meses"] == 3
+
+    [capacidade] = next(h for h in rel["hospitais"] if h["cnes"] == HRVJ)["semelhantes"]
+    assert capacidade["categoria"] == "CAPACIDADE" and capacidade["n_semelhantes"] == 8
+    assert capacidade["taxa_semelhantes"] == 0.0 and capacidade["vezes"] is None   # os semelhantes não perdem
+    assert capacidade["excesso_mes"] == 146000.0

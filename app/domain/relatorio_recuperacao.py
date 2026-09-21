@@ -34,7 +34,7 @@ from app.domain.prova import aih_rejeitadas
 from app.domain.resumo import _lotes, _nomes
 from app.domain.prevencao import GRUPOS as GRUPOS_FATURASUS
 from app.engine.categorias import POR_CODIGO, categorizar
-from app.models import CnesBed, SiaApacMonth, SihApprovedAih, SihHospitalMonth, SihPrevention
+from app.models import CnesBed, Opportunity, SiaApacMonth, SihApprovedAih, SihHospitalMonth, SihPrevention
 
 GRUPOS = {
     "RECUPERADA": "Já recuperada",
@@ -214,8 +214,67 @@ def _capacidade(db: Session, cnes: list[str], meses: list[str]) -> dict[str, dic
     return saida
 
 
+def _semelhantes(db: Session, cnes: list[str]) -> dict[str, list[dict[str, Any]]]:
+    """
+    Onde o hospital perde mais que os semelhantes (mesmo porte, perfil e complexidade), pelo último scan: taxa
+    do hospital sobre o apresentado contra a mediana deles, em vezes e em R$ por mês. O motor só registra o que
+    passa dos semelhantes.
+    """
+    ultimo: dict[str, str] = {}
+    linhas: list[Opportunity] = []
+    for lote in _lotes(cnes):
+        for o in db.execute(select(Opportunity).where(Opportunity.cnes.in_(lote), Opportunity.categoria != "")).scalars():
+            if "taxa_mediana_semelhantes" not in (o.evidence or {}):
+                continue
+            linhas.append(o)
+            ultimo[o.cnes] = max(ultimo.get(o.cnes, ""), o.periodo_fim)
+    saida: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for o in linhas:
+        if o.periodo_fim != ultimo[o.cnes]:
+            continue
+        ev = o.evidence
+        meses = len(ev.get("competencias") or []) or 1
+        taxa, mediana = ev.get("taxa_hospital") or 0.0, ev.get("taxa_mediana_semelhantes") or 0.0
+        saida[o.cnes].append({
+            "categoria": o.categoria, "nome": ev.get("titulo") or o.categoria,
+            "taxa_hospital": taxa, "taxa_semelhantes": mediana,
+            "vezes": round(taxa / mediana, 1) if mediana > 0 else None,
+            "excesso": round(o.gap or 0.0, 2), "excesso_mes": round((o.gap or 0.0) / meses, 2),
+            "n_semelhantes": ev.get("n_semelhantes") or 0,
+        })
+    for itens in saida.values():
+        itens.sort(key=lambda s: -s["excesso"])
+    return saida
+
+
+def _cenarios(bloco: dict[str, Any], antes_do_envio: dict[str, dict[str, float]], meses: int, percentual: float) -> dict[str, Any]:
+    """
+    Com e sem o software. Sem: o que o hospital já recuperou sozinho — medido. Com: projeção, em dois cenários —
+    conservador (o recuperado mais as AIH de chance alta) e completo (mais tudo o que ainda está no prazo). A
+    prevenção é o que o FaturaSUS teria pegado antes do envio, por mês. Honorários só sobre o que passa do que o
+    hospital já recupera sozinho.
+    """
+    base = bloco["rejeitadas"]["valor"] - bloco["JA_APROVADA"]["valor"]
+    sem = bloco["RECUPERADA"]["valor"]
+    conservador = sem + bloco["ALTA"]["valor"]
+    completo = sem + bloco["A_RECUPERAR"]["valor"] + bloco["DEPENDE_GESTOR"]["valor"]
+    pct = (lambda v: round(v / base, 4) if base > 0 else 0.0)
+    pegaria = antes_do_envio.get("PEGARIA", {}).get("valor", 0.0)
+    return {
+        "rejeitado": round(base, 2),
+        "sem_software": {"valor": round(sem, 2), "pct": pct(sem)},
+        "com_software_conservador": {"valor": round(conservador, 2), "pct": pct(conservador),
+                                     "honorarios": round((conservador - sem) * percentual / 100, 2)},
+        "com_software_completo": {"valor": round(completo, 2), "pct": pct(completo),
+                                  "honorarios": round((completo - sem) * percentual / 100, 2)},
+        "prevencao_por_mes": round(pegaria / (meses or 1), 2),
+        "meses": meses,
+    }
+
+
 def _novo_bloco() -> dict[str, Any]:
-    return {"rejeitadas": _soma(), **{g: _soma() for g in GRUPOS}, "botao": _soma(), "vence_neste_mes": _soma()}
+    return {"rejeitadas": _soma(), **{g: _soma() for g in GRUPOS}, "botao": _soma(), "vence_neste_mes": _soma(),
+            "ALTA": _soma()}
 
 
 def _fechar_bloco(b: dict[str, Any]) -> dict[str, Any]:
@@ -307,6 +366,8 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
         for bloco in (h["total"], mes, geral):
             _somar(bloco["rejeitadas"], valor)
             _somar(bloco[grupo], valor_grupo)
+            if grupo == "A_RECUPERAR" and classe == "ALTA":
+                _somar(bloco["ALTA"], valor)
             if grupo in ("A_RECUPERAR", "DEPENDE_GESTOR"):
                 if codigos and codigos <= MOTIVOS_DO_BOTAO:
                     _somar(bloco["botao"], valor)
@@ -332,6 +393,7 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
             "taxa": _taxa(h["total"], h["cobravel"], percentual),
             "simulacao": _simulacao(h["simulacao"]),
             "antes_do_envio": _simulacao(h["antes_do_envio"]),
+            "cenarios": _cenarios(h["total"], h["antes_do_envio"], len(h["meses"]), percentual),
             "apac": None,
             "prevenir": _prevenir(h["prevenir"], len(h["meses"]) or 1),
         }
@@ -341,7 +403,9 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
                    key=lambda h: -(h["total"]["A_RECUPERAR"]["valor"] + h["total"]["DEPENDE_GESTOR"]["valor"]
                                    + h["total"]["RECUPERADA"]["valor"]))
     capacidade = _capacidade(db, cnes, meses)
+    semelhantes = _semelhantes(db, cnes)
     for h in lista:
+        h["semelhantes"] = semelhantes.get(h["cnes"], [])
         h["apac"] = apac.get(h["cnes"])
         h["capacidade"] = capacidade.get(h["cnes"])
         if h["apac"] and h["apac"]["teto"] > 0:
@@ -362,6 +426,7 @@ def montar_relatorio(db: Session, cnes: list[str], meses: list[str], referencia:
         "taxa": _taxa(geral, geral_cobravel, percentual),
         "simulacao": _simulacao(geral_simulacao),
         "antes_do_envio": _simulacao(geral_antes_do_envio),
+        "cenarios": _cenarios(geral, geral_antes_do_envio, len({m for h in hospitais.values() for m in h["meses"]}), percentual),
         "simulacao_nomes": SIMULACAO,
         "apac": _somar_apac(list(apac.values())),
         "hospitais": lista,
